@@ -5,7 +5,7 @@ pub fn draw_surveillance_box(painter: &egui::Painter, rect: Rect, label: &str, s
     let color = if selected {
         RED
     } else {
-        Color32::from_rgb(211, 68, 68)
+        Color32::from_rgb(190, 0, 0)
     };
 
     let width = if selected { 1.8_f32 } else { 1.15_f32 };

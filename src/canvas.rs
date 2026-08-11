@@ -3,7 +3,7 @@ use eframe::egui::{
 };
 
 use crate::app::AnnotatorApp;
-use crate::geometry::{annotation_screen_rect, screen_to_image};
+use crate::geometry::{annotation_screen_rect, annotation_tag_rect, screen_to_image};
 use crate::models::{ActiveDrag, Annotation, Draft, ResizeHandle};
 use crate::render::draw_surveillance_box;
 use crate::theme::{BG, LINE, MUTED};
@@ -104,7 +104,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     }
                     if !cursor_set {
                         if app.annotations.iter().rev().any(|a| {
-                            annotation_screen_rect(a, image_rect, image_size).contains(pointer)
+                            annotation_tag_rect(a, image_rect, image_size).contains(pointer)
                         }) {
                             ctx.set_cursor_icon(CursorIcon::Move);
                         }
@@ -115,7 +115,8 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
             if response.double_clicked() {
                 if let Some(pointer) = response.interact_pointer_pos() {
                     if let Some(hit) = app.annotations.iter().rev().find(|annotation| {
-                        annotation_screen_rect(annotation, image_rect, image_size).contains(pointer)
+                        annotation_tag_rect(annotation, image_rect, image_size).contains(pointer)
+                            || annotation_screen_rect(annotation, image_rect, image_size).contains(pointer)
                     }) {
                         app.selected = Some(hit.id);
                         app.editing_label = Some(hit.id);
@@ -147,17 +148,16 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     }
 
                     if !handled {
-                        let hit = app
+                        let hit_tag = app
                             .annotations
                             .iter()
                             .rev()
                             .find(|annotation| {
-                                annotation_screen_rect(annotation, image_rect, image_size)
-                                    .contains(pointer)
+                                annotation_tag_rect(annotation, image_rect, image_size).contains(pointer)
                             })
                             .map(|a| (a.id, a.x, a.y));
 
-                        if let Some((id, x, y)) = hit {
+                        if let Some((id, x, y)) = hit_tag {
                             app.selected = Some(id);
                             app.active_drag = Some(ActiveDrag::Move {
                                 id,
@@ -283,8 +283,8 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         .iter()
                         .rev()
                         .find(|annotation| {
-                            annotation_screen_rect(annotation, image_rect, image_size)
-                                .contains(pointer)
+                            annotation_tag_rect(annotation, image_rect, image_size).contains(pointer)
+                                || annotation_screen_rect(annotation, image_rect, image_size).contains(pointer)
                         })
                         .map(|annotation| annotation.id);
                 }

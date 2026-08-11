@@ -24,3 +24,20 @@ pub fn annotation_screen_rect(annotation: &Annotation, image_rect: Rect, image_s
 
     Rect::from_min_max(min, max)
 }
+
+pub fn annotation_tag_rect(annotation: &Annotation, image_rect: Rect, image_size: Vec2) -> Rect {
+    let rect = annotation_screen_rect(annotation, image_rect, image_size);
+    let label = if annotation.label.trim().is_empty() {
+        "UNLABELED"
+    } else {
+        &annotation.label
+    };
+    let width = (label.len() as f32 * 6.5 + 10.0).max(35.0);
+    let height = 16.0;
+    let tag_rect = Rect::from_min_size(Pos2::new(rect.left(), rect.top() - height), Vec2::new(width, height));
+    if tag_rect.top() < image_rect.top() {
+        Rect::from_min_size(rect.min, Vec2::new(width, height))
+    } else {
+        tag_rect
+    }
+}
