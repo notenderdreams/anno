@@ -1,5 +1,5 @@
 use eframe::egui::{Color32, Pos2, TextureHandle};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -28,7 +28,7 @@ pub enum ActiveDrag {
     },
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Annotation {
     pub id: u32,
     pub label: String,
@@ -37,7 +37,7 @@ pub struct Annotation {
     pub width: f32,
     pub height: f32,
     pub color: [u8; 3],
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<u32>,
 }
 
@@ -45,6 +45,20 @@ impl Annotation {
     pub fn color32(&self) -> Color32 {
         Color32::from_rgb(self.color[0], self.color[1], self.color[2])
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProjectFile {
+    pub image: String,
+    pub image_width: u32,
+    pub image_height: u32,
+    #[serde(default = "default_next_id")]
+    pub next_id: u32,
+    pub annotations: Vec<Annotation>,
+}
+
+fn default_next_id() -> u32 {
+    1
 }
 
 #[derive(Serialize)]
@@ -145,5 +159,23 @@ mod tests {
         assert!(json[0]["children"][0]["children"][0]
             .get("children")
             .is_none());
+    }
+
+    #[test]
+    fn project_file_round_trip() {
+        use super::ProjectFile;
+
+        let project = ProjectFile {
+            image: "test_sample.png".into(),
+            image_width: 800,
+            image_height: 600,
+            next_id: 3,
+            annotations: vec![annotation(1, None), annotation(2, Some(1))],
+        };
+
+        let json_str = serde_json::to_string_pretty(&project).unwrap();
+        let decoded: ProjectFile = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(project, decoded);
     }
 }
