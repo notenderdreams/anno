@@ -112,7 +112,17 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 }
             }
 
-            if response.drag_started() {
+            if response.double_clicked() {
+                if let Some(pointer) = response.interact_pointer_pos() {
+                    if let Some(hit) = app.annotations.iter().rev().find(|annotation| {
+                        annotation_screen_rect(annotation, image_rect, image_size).contains(pointer)
+                    }) {
+                        app.selected = Some(hit.id);
+                        app.editing_label = Some(hit.id);
+                        app.request_label_focus = true;
+                    }
+                }
+            } else if response.drag_started() {
                 if let Some(pointer) = response
                     .interact_pointer_pos()
                     .filter(|point| image_rect.contains(*point))
@@ -157,6 +167,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             });
                         } else {
                             app.selected = None;
+                            app.editing_label = None;
                             app.draft = Some(Draft {
                                 start: pointer,
                                 current: pointer,
@@ -258,13 +269,14 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         });
 
                         app.selected = Some(id);
+                        app.editing_label = Some(id);
                         app.request_label_focus = true;
                         app.status = format!("REGION {id:02} CREATED");
                     }
                 }
             }
 
-            if response.clicked() {
+            if response.clicked() && !response.double_clicked() {
                 if let Some(pointer) = response.interact_pointer_pos() {
                     app.selected = app
                         .annotations
@@ -278,14 +290,49 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 }
             }
 
-            for annotation in &app.annotations {
+            let editing_id = app.editing_label;
+            let mut close_editing = false;
+
+            for annotation in &mut app.annotations {
                 let rect = annotation_screen_rect(annotation, image_rect, image_size);
+                let is_editing = editing_id == Some(annotation.id);
+
                 draw_surveillance_box(
                     &painter,
                     rect,
                     &annotation.label,
                     app.selected == Some(annotation.id),
                 );
+
+                if is_editing {
+                    let tag_height = 20.0;
+                    let edit_width = 140.0_f32.max(rect.width());
+                    let edit_rect = Rect::from_min_size(
+                        Pos2::new(rect.left(), (rect.top() - tag_height).max(painter.clip_rect().top())),
+                        Vec2::new(edit_width, tag_height),
+                    );
+
+                    let edit = ui.put(
+                        edit_rect,
+                        egui::TextEdit::singleline(&mut annotation.label)
+                            .font(FontId::monospace(10.0))
+                            .desired_width(edit_rect.width())
+                            .text_color(Color32::WHITE),
+                    );
+
+                    if app.request_label_focus {
+                        edit.request_focus();
+                        app.request_label_focus = false;
+                    }
+
+                    if edit.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        close_editing = true;
+                    }
+                }
+            }
+
+            if close_editing {
+                app.editing_label = None;
             }
 
             if let Some(draft) = &app.draft {

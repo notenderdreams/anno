@@ -9,6 +9,7 @@ pub struct AnnotatorApp {
     pub image: Option<LoadedImage>,
     pub annotations: Vec<Annotation>,
     pub selected: Option<u32>,
+    pub editing_label: Option<u32>,
     pub next_id: u32,
     pub draft: Option<Draft>,
     pub active_drag: Option<ActiveDrag>,
@@ -23,6 +24,7 @@ impl AnnotatorApp {
             image: None,
             annotations: Vec::new(),
             selected: None,
+            editing_label: None,
             next_id: 1,
             draft: None,
             active_drag: None,
@@ -65,6 +67,7 @@ impl AnnotatorApp {
                 });
                 self.annotations.clear();
                 self.selected = None;
+                self.editing_label = None;
                 self.active_drag = None;
                 self.next_id = 1;
                 self.status = format!("{} × {}  •  READY", width, height);
@@ -115,6 +118,7 @@ impl AnnotatorApp {
     pub fn delete_selected(&mut self) {
         if let Some(id) = self.selected.take() {
             self.annotations.retain(|annotation| annotation.id != id);
+            self.editing_label = None;
             self.active_drag = None;
             self.status = "ANNOTATION DELETED".into();
         }
@@ -143,6 +147,7 @@ impl AnnotatorApp {
         if escape {
             self.draft = None;
             self.active_drag = None;
+            self.editing_label = None;
             self.selected = None;
         }
         if let Some(path) = dropped.into_iter().find_map(|file| file.path) {
