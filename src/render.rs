@@ -1,11 +1,20 @@
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, Stroke, Vec2};
-use crate::theme::RED;
 
-pub fn draw_surveillance_box(painter: &egui::Painter, rect: Rect, label: &str, selected: bool) {
+pub fn draw_surveillance_box(
+    painter: &egui::Painter,
+    rect: Rect,
+    label: &str,
+    box_color: Color32,
+    selected: bool,
+) {
     let color = if selected {
-        RED
+        box_color
     } else {
-        Color32::from_rgb(190, 0, 0)
+        Color32::from_rgb(
+            (box_color.r() as f32 * 0.75) as u8,
+            (box_color.g() as f32 * 0.75) as u8,
+            (box_color.b() as f32 * 0.75) as u8,
+        )
     };
 
     let width = if selected { 1.8_f32 } else { 1.15_f32 };

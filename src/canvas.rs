@@ -6,7 +6,7 @@ use crate::app::AnnotatorApp;
 use crate::geometry::{annotation_screen_rect, annotation_tag_rect, screen_to_image};
 use crate::models::{ActiveDrag, Annotation, Draft, ResizeHandle};
 use crate::render::draw_surveillance_box;
-use crate::theme::{BG, MUTED};
+use crate::theme::{BG, MUTED, RED};
 
 fn hit_resize_handle(rect: Rect, pointer: Pos2) -> Option<ResizeHandle> {
     let radius = 10.0;
@@ -265,6 +265,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             y: min.y.round(),
                             width: (max.x - min.x).round(),
                             height: (max.y - min.y).round(),
+                            color: [255, 0, 0],
                         });
 
                         app.selected = Some(id);
@@ -300,6 +301,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     &painter,
                     rect,
                     &annotation.label,
+                    annotation.color32(),
                     app.selected == Some(annotation.id),
                 );
 
@@ -339,6 +341,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     &painter,
                     Rect::from_two_pos(draft.start, draft.current),
                     "NEW REGION",
+                    RED,
                     true,
                 );
             }

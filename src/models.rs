@@ -1,4 +1,4 @@
-use eframe::egui::{Pos2, TextureHandle};
+use eframe::egui::{Color32, Pos2, TextureHandle};
 use serde::Serialize;
 use std::path::PathBuf;
 
@@ -36,6 +36,13 @@ pub struct Annotation {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    pub color: [u8; 3],
+}
+
+impl Annotation {
+    pub fn color32(&self) -> Color32 {
+        Color32::from_rgb(self.color[0], self.color[1], self.color[2])
+    }
 }
 
 #[derive(Serialize)]

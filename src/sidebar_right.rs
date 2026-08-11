@@ -1,4 +1,4 @@
-use eframe::egui::{self, Color32, FontFamily, FontId, Margin, RichText, Vec2};
+use eframe::egui::{self, Color32, FontFamily, FontId, Margin, RichText, Stroke, Vec2};
 use crate::app::AnnotatorApp;
 use crate::theme::{MUTED, PANEL, RED};
 
@@ -36,6 +36,91 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         response.request_focus();
                         app.request_label_focus = false;
                     }
+
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("COLOR PRESETS").size(9.0).color(MUTED));
+                    ui.add_space(4.0);
+
+                    ui.horizontal(|ui| {
+                        let presets: [[u8; 3]; 6] = [
+                            [255, 0, 0],   // Red
+                            [0, 230, 118], // Green
+                            [41, 121, 255], // Blue
+                            [255, 214, 0], // Yellow
+                            [255, 145, 0], // Orange
+                            [0, 229, 255], // Cyan
+                        ];
+
+                        for rgb in presets {
+                            let color32 = Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+                            let is_selected = annotation.color == rgb;
+
+                            let (rect, response) =
+                                ui.allocate_exact_size(Vec2::splat(20.0), egui::Sense::click());
+                            if ui.is_rect_visible(rect) {
+                                ui.painter().rect_filled(rect, 2.0, color32);
+                                if is_selected {
+                                    ui.painter().rect_stroke(
+                                        rect.expand(2.0),
+                                        2.0,
+                                        Stroke::new(2.0_f32, Color32::WHITE),
+                                    );
+                                } else if response.hovered() {
+                                    ui.painter().rect_stroke(
+                                        rect.expand(1.0),
+                                        2.0,
+                                        Stroke::new(1.0_f32, Color32::GRAY),
+                                    );
+                                }
+                            }
+                            if response.clicked() {
+                                annotation.color = rgb;
+                            }
+                        }
+
+                        ui.add_space(4.0);
+
+                        let (rect, picker_response) =
+                            ui.allocate_exact_size(Vec2::splat(20.0), egui::Sense::click());
+                        if ui.is_rect_visible(rect) {
+                            ui.painter().rect_filled(rect, 2.0, annotation.color32());
+                            ui.painter().rect_stroke(
+                                rect,
+                                2.0,
+                                Stroke::new(1.0_f32, Color32::from_gray(120)),
+                            );
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "+",
+                                FontId::monospace(12.0),
+                                Color32::WHITE,
+                            );
+                        }
+
+                        let popup_id = ui.make_persistent_id("custom_color_picker_popup");
+                        if picker_response.clicked() {
+                            ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+                        }
+
+                        egui::popup_below_widget(
+                            ui,
+                            popup_id,
+                            &picker_response,
+                            egui::PopupCloseBehavior::CloseOnClickOutside,
+                            |ui| {
+                                ui.set_max_width(200.0);
+                                let mut color32 = annotation.color32();
+                                if egui::color_picker::color_picker_color32(
+                                    ui,
+                                    &mut color32,
+                                    egui::color_picker::Alpha::Opaque,
+                                ) {
+                                    annotation.color = [color32.r(), color32.g(), color32.b()];
+                                }
+                            },
+                        );
+                    });
 
                     ui.add_space(12.0);
                     ui.label(RichText::new("BOUNDS (PX)").size(9.0).color(MUTED));
