@@ -3,6 +3,8 @@ use crate::app::AnnotatorApp;
 use crate::theme::{MUTED, PANEL, RED};
 
 pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
+    let mut export_requested = false;
+
     egui::SidePanel::right("right_sidebar")
         .exact_width(240.0)
         .resizable(false)
@@ -169,7 +171,28 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     );
                 });
             }
+
+            if app.image.is_some() {
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    export_requested = ui
+                        .add_sized(
+                            [ui.available_width(), 32.0],
+                            egui::Button::new(
+                                RichText::new("EXPORT JSON")
+                                    .size(10.0)
+                                    .strong()
+                                    .color(Color32::BLACK),
+                            )
+                            .fill(Color32::WHITE),
+                        )
+                        .clicked();
+                });
+            }
         });
+
+    if export_requested {
+        app.save_dialog();
+    }
 }
 
 fn bound_row(ui: &mut egui::Ui, label: &str, val: f32) {
