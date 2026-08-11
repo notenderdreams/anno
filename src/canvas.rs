@@ -307,6 +307,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         app.annotations.push(Annotation {
                             id,
                             label: format!("object_{id:02}"),
+                            description: None,
                             x: min.x.round(),
                             y: min.y.round(),
                             width: (max.x - min.x).round(),

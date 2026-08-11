@@ -32,6 +32,8 @@ pub enum ActiveDrag {
 pub struct Annotation {
     pub id: u32,
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub x: f32,
     pub y: f32,
     pub width: f32,
@@ -52,6 +54,8 @@ pub struct ProjectFile {
     pub image: String,
     pub image_width: u32,
     pub image_height: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default = "default_next_id")]
     pub next_id: u32,
     pub annotations: Vec<Annotation>,
@@ -73,6 +77,8 @@ pub struct AnnotationFile<'a> {
 pub struct ExportAnnotation<'a> {
     pub id: u32,
     pub label: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<&'a str>,
     pub x: f32,
     pub y: f32,
     pub width: f32,
@@ -103,6 +109,7 @@ fn export_annotation<'a>(
     ExportAnnotation {
         id: annotation.id,
         label: &annotation.label,
+        description: annotation.description.as_deref(),
         x: annotation.x,
         y: annotation.y,
         width: annotation.width,
@@ -132,6 +139,7 @@ mod tests {
         Annotation {
             id,
             label: format!("Region {id}"),
+            description: Some("Sample region note".into()),
             x: 10.0,
             y: 20.0,
             width: 100.0,
@@ -152,6 +160,7 @@ mod tests {
         let json = serde_json::to_value(export_annotation_tree(&annotations)).unwrap();
 
         assert_eq!(json[0]["id"], 1);
+        assert_eq!(json[0]["description"], "Sample region note");
         assert_eq!(json[0]["children"][0]["id"], 2);
         assert_eq!(json[0]["children"][0]["children"][0]["id"], 3);
         assert!(json[0].get("parent_id").is_none());
@@ -169,6 +178,7 @@ mod tests {
             image: "test_sample.png".into(),
             image_width: 800,
             image_height: 600,
+            description: Some("Test project description".into()),
             next_id: 3,
             annotations: vec![annotation(1, None), annotation(2, Some(1))],
         };

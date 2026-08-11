@@ -39,6 +39,26 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         app.request_label_focus = false;
                     }
 
+                    ui.add_space(10.0);
+                    ui.label(RichText::new("DESCRIPTION").size(9.0).color(MUTED));
+                    ui.add_space(4.0);
+
+                    let mut desc = annotation.description.clone().unwrap_or_default();
+                    let desc_response = ui.add(
+                        egui::TextEdit::multiline(&mut desc)
+                            .font(FontId::monospace(11.0))
+                            .desired_width(f32::INFINITY)
+                            .desired_rows(3)
+                            .margin(Vec2::new(8.0, 7.0)),
+                    );
+                    if desc_response.changed() {
+                        annotation.description = if desc.trim().is_empty() {
+                            None
+                        } else {
+                            Some(desc)
+                        };
+                    }
+
                     ui.add_space(12.0);
                     ui.label(RichText::new("COLOR PRESETS").size(9.0).color(MUTED));
                     ui.add_space(4.0);

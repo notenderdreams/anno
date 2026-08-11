@@ -47,6 +47,7 @@ pub struct AnnotatorApp {
     pub status: String,
     pub request_label_focus: bool,
     pub native_menubar: Option<NativeMenuBar>,
+    pub project_description: Option<String>,
 }
 
 impl AnnotatorApp {
@@ -65,6 +66,7 @@ impl AnnotatorApp {
             status: "OPEN AN IMAGE OR PROJECT TO BEGIN".into(),
             request_label_focus: false,
             native_menubar: Some(NativeMenuBar::new()),
+            project_description: None,
         }
     }
 
@@ -164,6 +166,7 @@ impl AnnotatorApp {
                     width,
                     height,
                 });
+                self.project_description = project.description;
                 self.annotations = project.annotations;
                 update_hierarchy(&mut self.annotations);
                 let max_id = self.annotations.iter().map(|a| a.id).max().unwrap_or(0);
@@ -213,6 +216,7 @@ impl AnnotatorApp {
             image: image.path.to_string_lossy().into_owned(),
             image_width: image.width,
             image_height: image.height,
+            description: self.project_description.clone(),
             next_id: self.next_id,
             annotations: self.annotations.clone(),
         };
