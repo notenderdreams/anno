@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use eframe::egui::{self, Key};
 
 use crate::canvas::render_canvas;
-use crate::models::{Annotation, AnnotationFile, Draft, LoadedImage};
+use crate::models::{ActiveDrag, Annotation, AnnotationFile, Draft, LoadedImage};
 use crate::theme::configure_style;
 
 pub struct AnnotatorApp {
@@ -11,6 +11,7 @@ pub struct AnnotatorApp {
     pub selected: Option<u32>,
     pub next_id: u32,
     pub draft: Option<Draft>,
+    pub active_drag: Option<ActiveDrag>,
     pub status: String,
     pub request_label_focus: bool,
 }
@@ -24,6 +25,7 @@ impl AnnotatorApp {
             selected: None,
             next_id: 1,
             draft: None,
+            active_drag: None,
             status: "OPEN AN IMAGE TO BEGIN".into(),
             request_label_focus: false,
         }
@@ -63,6 +65,7 @@ impl AnnotatorApp {
                 });
                 self.annotations.clear();
                 self.selected = None;
+                self.active_drag = None;
                 self.next_id = 1;
                 self.status = format!("{} × {}  •  READY", width, height);
             }
@@ -112,6 +115,7 @@ impl AnnotatorApp {
     pub fn delete_selected(&mut self) {
         if let Some(id) = self.selected.take() {
             self.annotations.retain(|annotation| annotation.id != id);
+            self.active_drag = None;
             self.status = "ANNOTATION DELETED".into();
         }
     }
@@ -138,6 +142,7 @@ impl AnnotatorApp {
         }
         if escape {
             self.draft = None;
+            self.active_drag = None;
             self.selected = None;
         }
         if let Some(path) = dropped.into_iter().find_map(|file| file.path) {

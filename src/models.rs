@@ -2,6 +2,32 @@ use eframe::egui::{Pos2, TextureHandle};
 use serde::Serialize;
 use std::path::PathBuf;
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum ResizeHandle {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+pub enum ActiveDrag {
+    Move {
+        id: u32,
+        start_pointer: Pos2,
+        initial_x: f32,
+        initial_y: f32,
+    },
+    Resize {
+        id: u32,
+        handle: ResizeHandle,
+        start_pointer: Pos2,
+        initial_x: f32,
+        initial_y: f32,
+        initial_w: f32,
+        initial_h: f32,
+    },
+}
+
 #[derive(Clone, Serialize)]
 pub struct Annotation {
     pub id: u32,
