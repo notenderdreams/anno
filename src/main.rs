@@ -1,0 +1,25 @@
+pub mod app;
+pub mod canvas;
+pub mod geometry;
+pub mod models;
+pub mod render;
+pub mod theme;
+
+use app::AnnotatorApp;
+use eframe::egui::ViewportBuilder;
+
+fn main() -> eframe::Result<()> {
+    let options = eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_title("ANNO — Image Annotator")
+            .with_inner_size([1220.0, 780.0])
+            .with_min_inner_size([860.0, 560.0]),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "ANNO",
+        options,
+        Box::new(|cc| Ok(Box::new(AnnotatorApp::new(cc)))),
+    )
+}
