@@ -3,7 +3,7 @@ use eframe::egui::{
 };
 
 use crate::app::AnnotatorApp;
-use crate::geometry::{annotation_screen_rect, annotation_tag_rect, screen_to_image};
+use crate::geometry::{annotation_screen_rect, annotation_tag_rect, screen_to_image, update_hierarchy};
 use crate::models::{ActiveDrag, Annotation, Draft, ResizeHandle};
 use crate::render::draw_surveillance_box;
 use crate::theme::{BG, MUTED, RED};
@@ -266,6 +266,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             width: (max.x - min.x).round(),
                             height: (max.y - min.y).round(),
                             color: [255, 0, 0],
+                            parent_id: None,
                         });
 
                         app.selected = Some(id);
@@ -274,6 +275,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         app.status = format!("REGION {id:02} CREATED");
                     }
                 }
+                update_hierarchy(&mut app.annotations);
             }
 
             if response.clicked() && !response.double_clicked() {

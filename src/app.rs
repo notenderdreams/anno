@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use eframe::egui::{self, Key};
 
 use crate::canvas::render_canvas;
+use crate::geometry::update_hierarchy;
 use crate::models::{ActiveDrag, Annotation, AnnotationFile, Draft, LoadedImage};
 use crate::sidebar_left::render_left_sidebar;
 use crate::sidebar_right::render_right_sidebar;
@@ -120,6 +121,7 @@ impl AnnotatorApp {
     pub fn delete_selected(&mut self) {
         if let Some(id) = self.selected.take() {
             self.annotations.retain(|annotation| annotation.id != id);
+            update_hierarchy(&mut self.annotations);
             self.editing_label = None;
             self.active_drag = None;
             self.status = "ANNOTATION DELETED".into();

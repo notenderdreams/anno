@@ -37,6 +37,8 @@ pub struct Annotation {
     pub width: f32,
     pub height: f32,
     pub color: [u8; 3],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<u32>,
 }
 
 impl Annotation {

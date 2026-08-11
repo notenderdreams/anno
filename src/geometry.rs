@@ -41,3 +41,31 @@ pub fn annotation_tag_rect(annotation: &Annotation, image_rect: Rect, image_size
         tag_rect
     }
 }
+
+pub fn update_hierarchy(annotations: &mut [Annotation]) {
+    let snapshot = annotations.to_vec();
+    for item in annotations.iter_mut() {
+        let mut best_parent_id: Option<u32> = None;
+        let mut min_area = f32::MAX;
+
+        for candidate in &snapshot {
+            if candidate.id == item.id {
+                continue;
+            }
+
+            if candidate.x <= item.x
+                && candidate.y <= item.y
+                && (candidate.x + candidate.width) >= (item.x + item.width)
+                && (candidate.y + candidate.height) >= (item.y + item.height)
+            {
+                let area = candidate.width * candidate.height;
+                if area < min_area {
+                    min_area = area;
+                    best_parent_id = Some(candidate.id);
+                }
+            }
+        }
+
+        item.parent_id = best_parent_id;
+    }
+}
