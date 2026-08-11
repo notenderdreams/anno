@@ -1,5 +1,5 @@
 use eframe::egui::{
-    self, Align2, Color32, CursorIcon, FontId, Margin, Pos2, Rect, Sense, Vec2,
+    self, Align2, Color32, CursorIcon, FontId, Key, Margin, PointerButton, Pos2, Rect, Sense, Vec2,
 };
 
 use crate::app::AnnotatorApp;
@@ -7,6 +7,17 @@ use crate::geometry::{annotation_screen_rect, annotation_tag_rect, screen_to_ima
 use crate::models::{ActiveDrag, Annotation, Draft, ResizeHandle};
 use crate::render::draw_surveillance_box;
 use crate::theme::{BG, MUTED, RED};
+
+const MIN_ZOOM: f32 = 1.0;
+const MAX_ZOOM: f32 = 20.0;
+
+fn clamp_pan(pan: Vec2, canvas_size: Vec2, display_size: Vec2) -> Vec2 {
+    let limit = ((display_size - canvas_size) * 0.5).max(Vec2::ZERO);
+    Vec2::new(
+        pan.x.clamp(-limit.x, limit.x),
+        pan.y.clamp(-limit.y, limit.y),
+    )
+}
 
 fn hit_resize_handle(rect: Rect, pointer: Pos2) -> Option<ResizeHandle> {
     let radius = 10.0;
@@ -67,12 +78,45 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
             };
 
             let image_size = Vec2::new(image.width as f32, image.height as f32);
-            let scale = (canvas.width() / image_size.x)
+            let fit_scale = (canvas.width() / image_size.x)
                 .min(canvas.height() / image_size.y)
                 .min(1.0);
 
-            let display_size = image_size * scale;
-            let image_rect = Rect::from_center_size(canvas.center(), display_size);
+            // Keep the image point beneath the cursor fixed while zooming.
+            if response.hovered() && !response.dragged() {
+                let scroll_y = ctx.input(|input| input.raw_scroll_delta.y);
+                if scroll_y != 0.0 {
+                    if let Some(pointer) = response.hover_pos() {
+                        let old_zoom = app.zoom;
+                        let new_zoom = (old_zoom * (scroll_y * 0.02).exp())
+                            .clamp(MIN_ZOOM, MAX_ZOOM);
+                        let zoom_ratio = new_zoom / old_zoom;
+                        let old_center = canvas.center() + app.pan;
+                        let new_center = pointer + (old_center - pointer) * zoom_ratio;
+
+                        app.zoom = new_zoom;
+                        app.pan = new_center - canvas.center();
+                    }
+                }
+            }
+
+            let display_size = image_size * fit_scale * app.zoom;
+            app.pan = clamp_pan(app.pan, canvas.size(), display_size);
+
+            // Space-drag supports trackpads; middle-drag supports mice without
+            // taking the primary button away from annotation drawing.
+            let space_held = ctx.input(|input| input.key_down(Key::Space));
+            let is_panning = response.dragged_by(PointerButton::Middle)
+                || (space_held && response.dragged_by(PointerButton::Primary));
+            if is_panning {
+                let pointer_delta = ctx.input(|input| input.pointer.delta());
+                app.pan = clamp_pan(app.pan + pointer_delta, canvas.size(), display_size);
+                ctx.set_cursor_icon(CursorIcon::Grabbing);
+            } else if response.hovered() && space_held {
+                ctx.set_cursor_icon(CursorIcon::Grab);
+            }
+
+            let image_rect = Rect::from_center_size(canvas.center() + app.pan, display_size);
 
             painter.rect_filled(image_rect.expand(8.0), 0.0, Color32::BLACK);
             painter.image(
@@ -82,30 +126,32 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 Color32::WHITE,
             );
 
-            if let Some(pointer) = response.hover_pos() {
-                if image_rect.contains(pointer) {
-                    let mut cursor_set = false;
-                    if let Some(selected_id) = app.selected {
-                        if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id) {
-                            let rect = annotation_screen_rect(annotation, image_rect, image_size);
-                            if let Some(handle) = hit_resize_handle(rect, pointer) {
-                                match handle {
-                                    ResizeHandle::TopLeft | ResizeHandle::BottomRight => {
-                                        ctx.set_cursor_icon(CursorIcon::ResizeNwSe);
+            if !is_panning && !space_held {
+                if let Some(pointer) = response.hover_pos() {
+                    if image_rect.contains(pointer) {
+                        let mut cursor_set = false;
+                        if let Some(selected_id) = app.selected {
+                            if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id) {
+                                let rect = annotation_screen_rect(annotation, image_rect, image_size);
+                                if let Some(handle) = hit_resize_handle(rect, pointer) {
+                                    match handle {
+                                        ResizeHandle::TopLeft | ResizeHandle::BottomRight => {
+                                            ctx.set_cursor_icon(CursorIcon::ResizeNwSe);
+                                        }
+                                        ResizeHandle::TopRight | ResizeHandle::BottomLeft => {
+                                            ctx.set_cursor_icon(CursorIcon::ResizeNeSw);
+                                        }
                                     }
-                                    ResizeHandle::TopRight | ResizeHandle::BottomLeft => {
-                                        ctx.set_cursor_icon(CursorIcon::ResizeNeSw);
-                                    }
+                                    cursor_set = true;
                                 }
-                                cursor_set = true;
                             }
                         }
-                    }
-                    if !cursor_set {
-                        if app.annotations.iter().rev().any(|a| {
-                            annotation_tag_rect(a, image_rect, image_size).contains(pointer)
-                        }) {
-                            ctx.set_cursor_icon(CursorIcon::Move);
+                        if !cursor_set {
+                            if app.annotations.iter().rev().any(|a| {
+                                annotation_tag_rect(a, image_rect, image_size).contains(pointer)
+                            }) {
+                                ctx.set_cursor_icon(CursorIcon::Move);
+                            }
                         }
                     }
                 }
@@ -122,7 +168,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         app.request_label_focus = true;
                     }
                 }
-            } else if response.drag_started() {
+            } else if response.drag_started_by(PointerButton::Primary) && !space_held {
                 if let Some(pointer) = response
                     .interact_pointer_pos()
                     .filter(|point| image_rect.contains(*point))
@@ -176,7 +222,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 }
             }
 
-            if response.dragged() {
+            if response.dragged_by(PointerButton::Primary) && !space_held {
                 if let Some(pointer) = response.interact_pointer_pos() {
                     if let Some(active_drag) = &app.active_drag {
                         let delta_screen = pointer - active_drag_start_pointer(active_drag);
@@ -246,7 +292,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 }
             }
 
-            if response.drag_stopped() {
+            if response.drag_stopped_by(PointerButton::Primary) {
                 app.active_drag = None;
                 if let Some(draft) = app.draft.take() {
                     let rect = Rect::from_two_pos(draft.start, draft.current);
@@ -347,6 +393,23 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     true,
                 );
             }
+
+            let zoom_label = format!("ZOOM {:>3.0}%", app.zoom * 100.0);
+            let zoom_galley = painter.layout_no_wrap(
+                zoom_label,
+                FontId::monospace(9.0),
+                Color32::from_gray(180),
+            );
+            let zoom_rect = Rect::from_min_size(
+                canvas.left_bottom() - Vec2::new(0.0, zoom_galley.size().y + 12.0),
+                zoom_galley.size() + Vec2::new(12.0, 8.0),
+            );
+            painter.rect_filled(zoom_rect, 2.0, Color32::from_black_alpha(190));
+            painter.galley(
+                zoom_rect.min + Vec2::new(6.0, 4.0),
+                zoom_galley,
+                Color32::WHITE,
+            );
         });
 }
 

@@ -18,3 +18,5 @@ Shortcuts:
 - `Cmd/Ctrl+S` — save annotations
 - `Delete` / `Backspace` — remove the selected region
 - `Escape` — cancel drawing or deselect
+- Scroll over the canvas — zoom toward the cursor (up to 2000%)
+- Hold `Space` and drag, or middle-drag — pan a zoomed image

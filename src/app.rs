@@ -18,6 +18,8 @@ pub struct AnnotatorApp {
     pub next_id: u32,
     pub draft: Option<Draft>,
     pub active_drag: Option<ActiveDrag>,
+    pub zoom: f32,
+    pub pan: egui::Vec2,
     pub status: String,
     pub request_label_focus: bool,
 }
@@ -33,6 +35,8 @@ impl AnnotatorApp {
             next_id: 1,
             draft: None,
             active_drag: None,
+            zoom: 1.0,
+            pan: egui::Vec2::ZERO,
             status: "OPEN AN IMAGE TO BEGIN".into(),
             request_label_focus: false,
         }
@@ -74,6 +78,8 @@ impl AnnotatorApp {
                 self.selected = None;
                 self.editing_label = None;
                 self.active_drag = None;
+                self.zoom = 1.0;
+                self.pan = egui::Vec2::ZERO;
                 self.next_id = 1;
                 self.status = format!("{} × {}  •  READY", width, height);
             }
