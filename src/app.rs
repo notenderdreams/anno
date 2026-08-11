@@ -3,7 +3,9 @@ use eframe::egui::{self, Key};
 
 use crate::canvas::render_canvas;
 use crate::geometry::update_hierarchy;
-use crate::models::{ActiveDrag, Annotation, AnnotationFile, Draft, LoadedImage};
+use crate::models::{
+    export_annotation_tree, ActiveDrag, Annotation, AnnotationFile, Draft, LoadedImage,
+};
 use crate::sidebar_left::render_left_sidebar;
 use crate::sidebar_right::render_right_sidebar;
 use crate::theme::configure_style;
@@ -107,7 +109,7 @@ impl AnnotatorApp {
             image: image.path.to_string_lossy().into_owned(),
             image_width: image.width,
             image_height: image.height,
-            annotations: &self.annotations,
+            annotations: export_annotation_tree(&self.annotations),
         };
         match serde_json::to_string_pretty(&data)
             .map_err(|error| error.to_string())

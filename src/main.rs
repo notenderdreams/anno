@@ -13,7 +13,7 @@ use eframe::egui::ViewportBuilder;
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
-            .with_title("ANNO — Image Annotator")
+            .with_title("ANNO")
             .with_inner_size([1280.0, 780.0])
             .with_min_inner_size([900.0, 560.0]),
         ..Default::default()

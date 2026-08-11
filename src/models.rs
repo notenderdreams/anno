@@ -52,7 +52,50 @@ pub struct AnnotationFile<'a> {
     pub image: String,
     pub image_width: u32,
     pub image_height: u32,
-    pub annotations: &'a [Annotation],
+    pub annotations: Vec<ExportAnnotation<'a>>,
+}
+
+#[derive(Serialize)]
+pub struct ExportAnnotation<'a> {
+    pub id: u32,
+    pub label: &'a str,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub color: [u8; 3],
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<ExportAnnotation<'a>>,
+}
+
+pub fn export_annotation_tree(annotations: &[Annotation]) -> Vec<ExportAnnotation<'_>> {
+    annotations
+        .iter()
+        .filter(|annotation| annotation.parent_id.is_none())
+        .map(|annotation| export_annotation(annotation, annotations))
+        .collect()
+}
+
+fn export_annotation<'a>(
+    annotation: &'a Annotation,
+    annotations: &'a [Annotation],
+) -> ExportAnnotation<'a> {
+    let children = annotations
+        .iter()
+        .filter(|child| child.parent_id == Some(annotation.id))
+        .map(|child| export_annotation(child, annotations))
+        .collect();
+
+    ExportAnnotation {
+        id: annotation.id,
+        label: &annotation.label,
+        x: annotation.x,
+        y: annotation.y,
+        width: annotation.width,
+        height: annotation.height,
+        color: annotation.color,
+        children,
+    }
 }
 
 pub struct LoadedImage {
@@ -65,4 +108,42 @@ pub struct LoadedImage {
 pub struct Draft {
     pub start: Pos2,
     pub current: Pos2,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{export_annotation_tree, Annotation};
+
+    fn annotation(id: u32, parent_id: Option<u32>) -> Annotation {
+        Annotation {
+            id,
+            label: format!("Region {id}"),
+            x: 10.0,
+            y: 20.0,
+            width: 100.0,
+            height: 80.0,
+            color: [255, 0, 0],
+            parent_id,
+        }
+    }
+
+    #[test]
+    fn export_nests_children_and_hides_internal_parent_ids() {
+        let annotations = vec![
+            annotation(1, None),
+            annotation(2, Some(1)),
+            annotation(3, Some(2)),
+        ];
+
+        let json = serde_json::to_value(export_annotation_tree(&annotations)).unwrap();
+
+        assert_eq!(json[0]["id"], 1);
+        assert_eq!(json[0]["children"][0]["id"], 2);
+        assert_eq!(json[0]["children"][0]["children"][0]["id"], 3);
+        assert!(json[0].get("parent_id").is_none());
+        assert!(json[0]["children"][0].get("parent_id").is_none());
+        assert!(json[0]["children"][0]["children"][0]
+            .get("children")
+            .is_none());
+    }
 }
