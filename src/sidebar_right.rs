@@ -1,9 +1,16 @@
 use eframe::egui::{self, Color32, FontFamily, FontId, Margin, RichText, Stroke, Vec2};
 use crate::app::AnnotatorApp;
+use crate::geometry::update_hierarchy;
 use crate::theme::{MUTED, PANEL, RED};
 
 pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
     let mut export_requested = false;
+
+    let (img_w, img_h) = app
+        .image
+        .as_ref()
+        .map(|img| (img.width as f32, img.height as f32))
+        .unwrap_or((10000.0, 10000.0));
 
     egui::SidePanel::right("right_sidebar")
         .exact_width(240.0)
@@ -18,6 +25,8 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
             if let Some(selected_id) = app.selected {
                 let mut should_delete = false;
+                let mut bounds_changed = false;
+
                 if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == selected_id) {
                     ui.label(
                         RichText::new(format!("REGION {:02}", annotation.id))
@@ -148,15 +157,28 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     ui.label(RichText::new("BOUNDS (PX)").size(9.0).color(MUTED));
                     ui.add_space(4.0);
 
+                    let max_x = (img_w - annotation.width).max(0.0);
+                    let max_y = (img_h - annotation.height).max(0.0);
+                    let max_w = (img_w - annotation.x).max(8.0);
+                    let max_h = (img_h - annotation.y).max(8.0);
+
                     egui::Grid::new("right_bounds_grid")
                         .num_columns(2)
-                        .spacing([20.0, 6.0])
+                        .spacing([12.0, 6.0])
                         .show(ui, |ui| {
-                            bound_row(ui, "X", annotation.x);
-                            bound_row(ui, "Y", annotation.y);
+                            if bound_field(ui, "X", &mut annotation.x, 0.0, max_x) {
+                                bounds_changed = true;
+                            }
+                            if bound_field(ui, "Y", &mut annotation.y, 0.0, max_y) {
+                                bounds_changed = true;
+                            }
                             ui.end_row();
-                            bound_row(ui, "W", annotation.width);
-                            bound_row(ui, "H", annotation.height);
+                            if bound_field(ui, "W", &mut annotation.width, 8.0, max_w) {
+                                bounds_changed = true;
+                            }
+                            if bound_field(ui, "H", &mut annotation.height, 8.0, max_h) {
+                                bounds_changed = true;
+                            }
                             ui.end_row();
                         });
 
@@ -167,6 +189,10 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             egui::Button::new(RichText::new("DELETE REGION").size(10.0).color(RED)),
                         )
                         .clicked();
+                }
+
+                if bounds_changed {
+                    update_hierarchy(&mut app.annotations);
                 }
 
                 if should_delete {
@@ -215,13 +241,51 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
     }
 }
 
-fn bound_row(ui: &mut egui::Ui, label: &str, val: f32) {
+fn bound_field(
+    ui: &mut egui::Ui,
+    label: &str,
+    val: &mut f32,
+    min: f32,
+    max: f32,
+) -> bool {
+    let mut changed = false;
+
     ui.horizontal(|ui| {
-        ui.label(RichText::new(label).size(9.0).color(RED));
-        ui.label(
-            RichText::new(format!("{val:.0}"))
-                .family(FontFamily::Monospace)
-                .size(11.0),
+        ui.spacing_mut().item_spacing.x = 4.0;
+
+        let label_response = ui.add(
+            egui::Label::new(
+                RichText::new(label)
+                    .font(FontId::monospace(10.0))
+                    .strong()
+                    .color(RED),
+            )
+            .sense(egui::Sense::click_and_drag()),
         );
+
+        if label_response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+
+        if label_response.dragged() {
+            let delta = ui.input(|i| i.pointer.delta().x);
+            if delta != 0.0 {
+                let speed = if ui.input(|i| i.modifiers.shift) { 0.1 } else { 1.0 };
+                *val = (*val + delta * speed).clamp(min, max).round();
+                changed = true;
+            }
+        }
+
+        let drag_val = egui::DragValue::new(val)
+            .speed(1.0)
+            .range(min..=max);
+
+        let drag_response = ui.add(drag_val);
+        if drag_response.changed() {
+            *val = val.round();
+            changed = true;
+        }
     });
+
+    changed
 }
