@@ -3,6 +3,7 @@ use eframe::egui::{self, Key};
 
 use crate::canvas::render_canvas;
 use crate::models::{ActiveDrag, Annotation, AnnotationFile, Draft, LoadedImage};
+use crate::sidebar_right::render_right_sidebar;
 use crate::theme::configure_style;
 
 pub struct AnnotatorApp {
@@ -159,6 +160,7 @@ impl AnnotatorApp {
 impl eframe::App for AnnotatorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.shortcuts_and_drops(ctx);
+        render_right_sidebar(self, ctx);
         render_canvas(self, ctx);
     }
 }

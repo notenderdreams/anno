@@ -1,12 +1,12 @@
 use eframe::egui::{
-    self, Align2, Color32, CursorIcon, FontId, Margin, Pos2, Rect, Sense, Stroke, Vec2,
+    self, Align2, Color32, CursorIcon, FontId, Margin, Pos2, Rect, Sense, Vec2,
 };
 
 use crate::app::AnnotatorApp;
 use crate::geometry::{annotation_screen_rect, annotation_tag_rect, screen_to_image};
 use crate::models::{ActiveDrag, Annotation, Draft, ResizeHandle};
 use crate::render::draw_surveillance_box;
-use crate::theme::{BG, LINE, MUTED};
+use crate::theme::{BG, MUTED};
 
 fn hit_resize_handle(rect: Rect, pointer: Pos2) -> Option<ResizeHandle> {
     let radius = 10.0;
@@ -36,7 +36,6 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
             let canvas = response.rect;
 
             let Some(image) = &app.image else {
-                painter.rect_stroke(canvas.shrink(1.0), 0.0, Stroke::new(1.0_f32, LINE));
                 let center = canvas.center();
 
                 painter.text(

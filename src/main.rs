@@ -3,6 +3,7 @@ pub mod canvas;
 pub mod geometry;
 pub mod models;
 pub mod render;
+pub mod sidebar_right;
 pub mod theme;
 
 use app::AnnotatorApp;
