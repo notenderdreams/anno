@@ -14,6 +14,7 @@ pub struct NativeMenuBar {
     pub export_json: MenuItem,
     pub export_dataset_json: MenuItem,
     pub crop_export: MenuItem,
+    pub copy_position: MenuItem,
     pub undo: MenuItem,
     pub redo: MenuItem,
     pub select_all: MenuItem,
@@ -136,6 +137,12 @@ impl NativeMenuBar {
                 Code::KeyZ,
             )),
         );
+        let copy_position = MenuItem::with_id(
+            "copy_position",
+            "Copy Position (JSON)",
+            false,
+            Some(Accelerator::new(Some(Modifiers::SUPER), Code::KeyC)),
+        );
         let select_all = MenuItem::with_id(
             "select_all",
             "Select All",
@@ -166,9 +173,7 @@ impl NativeMenuBar {
             &undo,
             &redo,
             &PredefinedMenuItem::separator(),
-            &PredefinedMenuItem::cut(None),
-            &PredefinedMenuItem::copy(None),
-            &PredefinedMenuItem::paste(None),
+            &copy_position,
             &select_all,
             &toggle_lock,
             &PredefinedMenuItem::separator(),
@@ -234,6 +239,7 @@ impl NativeMenuBar {
             export_json,
             export_dataset_json,
             crop_export,
+            copy_position,
             undo,
             redo,
             select_all,
@@ -264,6 +270,7 @@ impl NativeMenuBar {
         self.export_json.set_enabled(has_image);
         self.export_dataset_json.set_enabled(has_dataset);
         self.crop_export.set_enabled(has_image && has_selection);
+        self.copy_position.set_enabled(has_selection);
         self.reset_view.set_enabled(has_image);
         self.zoom_in.set_enabled(has_image);
         self.zoom_out.set_enabled(has_image);
@@ -309,6 +316,7 @@ pub fn handle_native_menu_events(app: &mut AnnotatorApp, ctx: &egui::Context) {
             "export_json" => app.export_dialog(),
             "export_dataset_json" => app.export_unified_dataset_dialog(),
             "crop_export" => app.crop_and_export_selected(),
+            "copy_position" => app.copy_selected_position_to_clipboard(ctx),
             "undo" => app.undo(),
             "redo" => app.redo(),
             "select_all" => app.select_all(),

@@ -38,6 +38,7 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 let mut should_delete = false;
                 let mut should_convert_to_poly = false;
                 let mut should_crop_export = false;
+                let mut should_copy_position = false;
                 let mut bounds_changed = false;
                 let other_labels: Vec<(u32, String)> = app
                     .annotations
@@ -392,19 +393,36 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("BOUNDS (PX)").size(9.0).color(MUTED));
-                        if let Some(pts) = &annotation.points {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            RichText::new("📋 COPY")
+                                                .size(8.5)
+                                                .monospace()
+                                                .color(Color32::from_rgb(180, 220, 255)),
+                                        )
+                                        .fill(Color32::from_gray(30))
+                                        .stroke(Stroke::new(1.0_f32, Color32::from_gray(60)))
+                                        .rounding(2.0),
+                                    )
+                                    .on_hover_text("Copy position/coordinates to clipboard (Cmd/Ctrl+C)")
+                                    .clicked()
+                                {
+                                    should_copy_position = true;
+                                }
+                                if let Some(pts) = &annotation.points {
                                     ui.label(
                                         RichText::new(format!("POLYGON ({} PTS)", pts.len()))
                                             .size(8.5)
                                             .monospace()
                                             .color(Color32::from_rgb(100, 180, 255)),
                                     );
-                                },
-                            );
-                        }
+                                }
+                            },
+                        );
                     });
                     ui.add_space(4.0);
 
@@ -510,6 +528,10 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     app.crop_and_export_selected();
                 }
 
+                if should_copy_position {
+                    app.copy_selected_position_to_clipboard(ui.ctx());
+                }
+
                 if bounds_changed {
                     update_hierarchy(&mut app.annotations);
                 }
@@ -537,6 +559,7 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
             } else if app.selected.len() > 1 {
                 let mut should_delete = false;
                 let mut should_crop_export = false;
+                let mut should_copy_position = false;
                 let count = app.selected.len();
 
                 ui.horizontal(|ui| {
@@ -957,6 +980,27 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     .add_sized(
                         [ui.available_width(), 26.0],
                         egui::Button::new(
+                            RichText::new("📋 COPY POSITIONS (JSON)")
+                                .size(9.0)
+                                .monospace()
+                                .strong()
+                                .color(Color32::from_rgb(180, 220, 255)),
+                        )
+                        .fill(Color32::from_gray(30))
+                        .stroke(Stroke::new(1.0_f32, Color32::from_gray(60)))
+                        .rounding(2.0),
+                    )
+                    .on_hover_text("Copy positions of all selected regions to clipboard (Cmd/Ctrl+C)")
+                    .clicked()
+                {
+                    should_copy_position = true;
+                }
+
+                ui.add_space(8.0);
+                if ui
+                    .add_sized(
+                        [ui.available_width(), 26.0],
+                        egui::Button::new(
                             RichText::new(format!("CROP & EXPORT {count} REGIONS"))
                                 .size(9.0)
                                 .monospace()
@@ -1004,6 +1048,10 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                 if should_crop_export {
                     app.crop_and_export_selected();
+                }
+
+                if should_copy_position {
+                    app.copy_selected_position_to_clipboard(ui.ctx());
                 }
 
                 if let Some(color) = picked_color {

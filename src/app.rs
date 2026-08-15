@@ -1604,6 +1604,87 @@ impl AnnotatorApp {
         }
     }
 
+    pub fn format_selected_positions(&self) -> Option<(String, String)> {
+        if let Some((anno_id, v_idx)) = self.selected_vertex
+            && let Some(anno) = self.annotations.iter().find(|a| a.id == anno_id)
+            && let Some(points) = &anno.points
+            && let Some(pt) = points.get(v_idx)
+        {
+            let text = format!("[{}, {}]", pt[0], pt[1]);
+            let status = format!("COPIED VERTEX #{} POSITION {} TO CLIPBOARD", v_idx + 1, text);
+            return Some((text, status));
+        }
+
+        if self.selected.is_empty() {
+            return None;
+        }
+
+        if self.selected.len() == 1 {
+            let anno_id = *self.selected.iter().next()?;
+            let anno = self.annotations.iter().find(|a| a.id == anno_id)?;
+            let val = if let Some(points) = &anno.points {
+                serde_json::json!({
+                    "x": anno.x,
+                    "y": anno.y,
+                    "width": anno.width,
+                    "height": anno.height,
+                    "points": points,
+                })
+            } else {
+                serde_json::json!({
+                    "x": anno.x,
+                    "y": anno.y,
+                    "width": anno.width,
+                    "height": anno.height,
+                })
+            };
+            let text = serde_json::to_string(&val).unwrap_or_default();
+            let status = format!("COPIED REGION {:02} POSITION TO CLIPBOARD: {}", anno.id, text);
+            Some((text, status))
+        } else {
+            let list: Vec<serde_json::Value> = self
+                .annotations
+                .iter()
+                .filter(|a| self.selected.contains(&a.id))
+                .map(|a| {
+                    if let Some(pts) = &a.points {
+                        serde_json::json!({
+                            "id": a.id,
+                            "label": a.label,
+                            "x": a.x,
+                            "y": a.y,
+                            "width": a.width,
+                            "height": a.height,
+                            "points": pts,
+                        })
+                    } else {
+                        serde_json::json!({
+                            "id": a.id,
+                            "label": a.label,
+                            "x": a.x,
+                            "y": a.y,
+                            "width": a.width,
+                            "height": a.height,
+                        })
+                    }
+                })
+                .collect();
+            let text = serde_json::to_string_pretty(&list).unwrap_or_default();
+            let count = list.len();
+            let status = format!("COPIED {count} REGION POSITIONS TO CLIPBOARD");
+            Some((text, status))
+        }
+    }
+
+    pub fn copy_selected_position_to_clipboard(&mut self, ctx: &egui::Context) {
+        if let Some((text, status)) = self.format_selected_positions() {
+            ctx.copy_text(text);
+            self.status = status;
+        } else {
+            self.status = "NO REGION OR VERTEX SELECTED TO COPY".into();
+        }
+    }
+
     pub fn save_to(&mut self, path: &Path) {
         self.export_to(path);
     }
@@ -1653,6 +1734,7 @@ impl AnnotatorApp {
             export_json,
             export_dataset,
             crop_export,
+            copy_pos,
             undo,
             redo,
             delete,
@@ -1677,6 +1759,7 @@ impl AnnotatorApp {
                 cmd_or_ctrl && !shift && input.key_pressed(Key::E),
                 cmd_or_ctrl && shift && input.key_pressed(Key::E),
                 cmd_or_ctrl && shift && input.key_pressed(Key::C),
+                cmd_or_ctrl && !shift && !alt && input.key_pressed(Key::C),
                 cmd_or_ctrl && !shift && input.key_pressed(Key::Z),
                 (cmd_or_ctrl && shift && input.key_pressed(Key::Z))
                     || (cmd_or_ctrl && input.key_pressed(Key::Y)),
@@ -1812,6 +1895,12 @@ impl AnnotatorApp {
                 && self.autocomplete_nav.is_none()
             {
                 self.nudge_selected(nudge_x, nudge_y);
+            } else if copy_pos
+                && (!self.selected.is_empty() || self.selected_vertex.is_some())
+                && self.editing_label.is_none()
+                && self.autocomplete_nav.is_none()
+            {
+                self.copy_selected_position_to_clipboard(ctx);
             } else if convert_to_poly
                 && !self.selected.is_empty()
                 && self.editing_label.is_none()
@@ -1836,6 +1925,7 @@ impl AnnotatorApp {
             } else if tool_poly {
                 self.tool_mode = ToolMode::Polygon;
                 self.selected.clear();
+                self.selected_vertex = None;
                 self.editing_label = None;
                 self.draft = None;
                 self.marquee = None;
@@ -3117,5 +3207,69 @@ mod tests {
         // (45, 45) is outside the triangle -> alpha should be 0 (transparent)
         let outside = cropped.get_pixel(45, 45);
         assert_eq!(outside[3], 0);
+    }
+
+    #[test]
+    fn test_format_selected_positions_vertex() {
+        let mut app = test_app();
+        let mut anno = sample_annotation(1);
+        anno.points = Some(vec![[15.0, 25.0], [80.0, 25.0], [80.0, 90.0]]);
+        app.annotations.push(anno);
+        app.select_single(1);
+        app.selected_vertex = Some((1, 0));
+
+        let (text, status) = app.format_selected_positions().expect("Should format vertex position");
+        assert_eq!(text, "[15, 25]");
+        assert!(status.contains("VERTEX #1"));
+        assert!(status.contains("[15, 25]"));
+    }
+
+    #[test]
+    fn test_format_selected_positions_rectangle() {
+        let mut app = test_app();
+        let mut anno = sample_annotation(1);
+        anno.x = 10.0;
+        anno.y = 20.0;
+        anno.width = 100.0;
+        anno.height = 80.0;
+        anno.points = None;
+        app.annotations.push(anno);
+        app.select_single(1);
+
+        let (text, status) = app.format_selected_positions().expect("Should format box position");
+        assert!(text.contains("\"x\":10.0"));
+        assert!(text.contains("\"y\":20.0"));
+        assert!(text.contains("\"width\":100.0"));
+        assert!(text.contains("\"height\":80.0"));
+        assert!(status.contains("COPIED REGION 01 POSITION"));
+    }
+
+    #[test]
+    fn test_format_selected_positions_polygon() {
+        let mut app = test_app();
+        let mut anno = sample_annotation(1);
+        anno.x = 10.0;
+        anno.y = 20.0;
+        anno.width = 100.0;
+        anno.height = 80.0;
+        anno.points = Some(vec![[10.0, 20.0], [110.0, 20.0], [110.0, 100.0]]);
+        app.annotations.push(anno);
+        app.select_single(1);
+
+        let (text, _) = app.format_selected_positions().expect("Should format polygon position");
+        assert!(text.contains("\"points\":[[10.0,20.0],[110.0,20.0],[110.0,100.0]]"));
+    }
+
+    #[test]
+    fn test_format_selected_positions_multi() {
+        let mut app = test_app();
+        app.annotations.push(sample_annotation(1));
+        app.annotations.push(sample_annotation(2));
+        app.selected.insert(1);
+        app.selected.insert(2);
+
+        let (text, status) = app.format_selected_positions().expect("Should format multi positions");
+        assert!(text.starts_with('['));
+        assert!(status.contains("2 REGION POSITIONS"));
     }
 }
