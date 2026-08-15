@@ -35,6 +35,7 @@ Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` /
 - `Shift` + click / `Cmd/Ctrl` + click — toggle / multi-select regions (canvas or hierarchy)
 - `Shift` + drag — marquee box multi-selection
 - Drag selected — move all selected regions together in unison
+- `Arrow Keys` (`←` / `→` / `↑` / `↓`) — nudge selected region(s) by 1px (or 10px with `Shift`)
 - `Cmd/Ctrl+S` — save a single-image `.anno` project or multi-image `.annobatch`
 - `Cmd/Ctrl+E` — export current image JSON
 - `Cmd/Ctrl+Shift+E` — export unified dataset JSON

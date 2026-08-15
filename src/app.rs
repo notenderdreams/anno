@@ -247,6 +247,80 @@ impl AnnotatorApp {
         self.editing_label = None;
     }
 
+    pub fn nudge_selected(&mut self, dx: f32, dy: f32) -> bool {
+        if self.selected.is_empty() {
+            return false;
+        }
+
+        let active_ids: Vec<u32> = self
+            .annotations
+            .iter()
+            .filter(|a| self.selected.contains(&a.id) && !a.locked)
+            .map(|a| a.id)
+            .collect();
+
+        if active_ids.is_empty() {
+            self.status = "LOCKED REGION(S) CANNOT BE MOVED".into();
+            return false;
+        }
+
+        let mut min_dx = -f32::INFINITY;
+        let mut max_dx = f32::INFINITY;
+        let mut min_dy = -f32::INFINITY;
+        let mut max_dy = f32::INFINITY;
+
+        if let Some(image) = &self.image {
+            let img_w = image.width as f32;
+            let img_h = image.height as f32;
+            for &id in &active_ids {
+                if let Some(a) = self.annotations.iter().find(|a| a.id == id) {
+                    min_dx = min_dx.max(-a.x);
+                    max_dx = max_dx.min(img_w - (a.x + a.width));
+                    min_dy = min_dy.max(-a.y);
+                    max_dy = max_dy.min(img_h - (a.y + a.height));
+                }
+            }
+        }
+
+        let clamped_dx = if min_dx <= max_dx {
+            dx.clamp(min_dx, max_dx)
+        } else {
+            0.0
+        };
+        let clamped_dy = if min_dy <= max_dy {
+            dy.clamp(min_dy, max_dy)
+        } else {
+            0.0
+        };
+
+        if clamped_dx == 0.0 && clamped_dy == 0.0 {
+            return false;
+        }
+
+        self.history.record(self.current_snapshot());
+
+        for &id in &active_ids {
+            if let Some(a) = self.annotations.iter_mut().find(|a| a.id == id) {
+                a.x = (a.x + clamped_dx).round();
+                a.y = (a.y + clamped_dy).round();
+                if let Some(pts) = &mut a.points {
+                    for p in pts.iter_mut() {
+                        p[0] = (p[0] + clamped_dx).round();
+                        p[1] = (p[1] + clamped_dy).round();
+                    }
+                }
+            }
+        }
+
+        update_hierarchy(&mut self.annotations);
+        self.status = if active_ids.len() == 1 {
+            "REGION NUDGED".into()
+        } else {
+            format!("{} REGIONS NUDGED", active_ids.len())
+        };
+        true
+    }
+
     pub fn toggle_lock_annotation(&mut self, id: u32) {
         if let Some(annotation) = self.annotations.iter().find(|a| a.id == id) {
             let new_locked = !annotation.locked;
@@ -1395,8 +1469,37 @@ impl AnnotatorApp {
             (no_mod && input.key_pressed(Key::B), no_mod && input.key_pressed(Key::P))
         });
 
+        let (arrow_left, arrow_right, arrow_up, arrow_down, arrow_shift) = ctx.input(|input| {
+            let no_cmd_ctrl_alt = !input.modifiers.command && !input.modifiers.ctrl && !input.modifiers.alt;
+            (
+                no_cmd_ctrl_alt && input.key_pressed(Key::ArrowLeft),
+                no_cmd_ctrl_alt && input.key_pressed(Key::ArrowRight),
+                no_cmd_ctrl_alt && input.key_pressed(Key::ArrowUp),
+                no_cmd_ctrl_alt && input.key_pressed(Key::ArrowDown),
+                input.modifiers.shift,
+            )
+        });
+
         if !ctx.wants_keyboard_input() {
-            if let Some(idx) = digit_preset {
+            let mut nudge_x = 0.0_f32;
+            let mut nudge_y = 0.0_f32;
+            let step = if arrow_shift { 10.0 } else { 1.0 };
+            if arrow_left {
+                nudge_x -= step;
+            }
+            if arrow_right {
+                nudge_x += step;
+            }
+            if arrow_up {
+                nudge_y -= step;
+            }
+            if arrow_down {
+                nudge_y += step;
+            }
+
+            if (nudge_x != 0.0 || nudge_y != 0.0) && !self.selected.is_empty() && self.editing_label.is_none() && self.autocomplete_nav.is_none() {
+                self.nudge_selected(nudge_x, nudge_y);
+            } else if let Some(idx) = digit_preset {
                 self.apply_preset(idx);
             } else if tool_rect {
                 self.tool_mode = ToolMode::Rectangle;
@@ -2348,5 +2451,137 @@ mod tests {
         assert!(poly.points.is_some());
         assert_eq!(poly.x, 50.0);
         assert_eq!(poly.y, 50.0);
+    }
+
+    #[test]
+    fn test_nudge_single_box() {
+        let mut app = test_app();
+        app.annotations.push(sample_annotation(1)); // x: 10, y: 10, w: 50, h: 50
+        app.select_single(1);
+
+        // Nudge right by 1px
+        assert!(app.nudge_selected(1.0, 0.0));
+        assert_eq!(app.annotations[0].x, 11.0);
+        assert_eq!(app.annotations[0].y, 10.0);
+
+        // Nudge down by 10px (Shift + ArrowDown)
+        assert!(app.nudge_selected(0.0, 10.0));
+        assert_eq!(app.annotations[0].x, 11.0);
+        assert_eq!(app.annotations[0].y, 20.0);
+    }
+
+    #[test]
+    fn test_nudge_polygon_translates_points_and_bounding_box() {
+        let mut app = test_app();
+        app.annotations.push(Annotation {
+            id: 1,
+            label: "poly".into(),
+            description: None,
+            x: 20.0,
+            y: 30.0,
+            width: 40.0,
+            height: 40.0,
+            color: [0, 255, 0],
+            parent_id: None,
+            locked: false,
+            points: Some(vec![[20.0, 30.0], [60.0, 30.0], [60.0, 70.0], [20.0, 70.0]]),
+        });
+        app.select_single(1);
+
+        assert!(app.nudge_selected(5.0, -10.0));
+        assert_eq!(app.annotations[0].x, 25.0);
+        assert_eq!(app.annotations[0].y, 20.0);
+        let pts = app.annotations[0].points.as_ref().unwrap();
+        assert_eq!(pts[0], [25.0, 20.0]);
+        assert_eq!(pts[1], [65.0, 20.0]);
+        assert_eq!(pts[2], [65.0, 60.0]);
+        assert_eq!(pts[3], [25.0, 60.0]);
+    }
+
+    #[test]
+    fn test_nudge_multi_selection() {
+        let mut app = test_app();
+        app.annotations.push(sample_annotation(1)); // (10, 10)
+        app.annotations.push(sample_annotation(2)); // (20, 20)
+        app.selected.insert(1);
+        app.selected.insert(2);
+
+        assert!(app.nudge_selected(-5.0, 15.0));
+        assert_eq!(app.annotations[0].x, 5.0);
+        assert_eq!(app.annotations[0].y, 25.0);
+        assert_eq!(app.annotations[1].x, 15.0);
+        assert_eq!(app.annotations[1].y, 35.0);
+    }
+
+    #[test]
+    fn test_nudge_clamped_to_image_bounds() {
+        let mut app = test_app();
+        let ctx = egui::Context::default();
+        let pixel = egui::ColorImage::new([1, 1], egui::Color32::WHITE);
+        app.image = Some(LoadedImage {
+            texture: ctx.load_texture("test_img", pixel, egui::TextureOptions::LINEAR),
+            width: 100,
+            height: 100,
+            path: PathBuf::from("/test.png"),
+        });
+
+        // Box at (80, 80) with size (20, 20) -> reaches image right-bottom edge (100, 100)
+        app.annotations.push(Annotation {
+            id: 1,
+            label: "edge".into(),
+            description: None,
+            x: 80.0,
+            y: 80.0,
+            width: 20.0,
+            height: 20.0,
+            color: [255, 0, 0],
+            parent_id: None,
+            locked: false,
+            points: None,
+        });
+        app.select_single(1);
+
+        // Cannot move past right/bottom edge
+        assert!(!app.nudge_selected(5.0, 5.0));
+        assert_eq!(app.annotations[0].x, 80.0);
+        assert_eq!(app.annotations[0].y, 80.0);
+
+        // Moving left by 100px is clamped to x: 0
+        assert!(app.nudge_selected(-100.0, 0.0));
+        assert_eq!(app.annotations[0].x, 0.0);
+    }
+
+    #[test]
+    fn test_nudge_locked_annotation_protected() {
+        let mut app = test_app();
+        let mut anno = sample_annotation(1);
+        anno.locked = true;
+        app.annotations.push(anno);
+        app.select_single(1);
+
+        assert!(!app.nudge_selected(10.0, 10.0));
+        assert_eq!(app.annotations[0].x, 10.0);
+        assert_eq!(app.annotations[0].y, 10.0);
+    }
+
+    #[test]
+    fn test_nudge_undo_redo() {
+        let mut app = test_app();
+        app.annotations.push(sample_annotation(1)); // (10, 10)
+        app.select_single(1);
+
+        assert!(app.nudge_selected(5.0, 5.0));
+        assert_eq!(app.annotations[0].x, 15.0);
+        assert_eq!(app.annotations[0].y, 15.0);
+
+        // Undo
+        app.undo();
+        assert_eq!(app.annotations[0].x, 10.0);
+        assert_eq!(app.annotations[0].y, 10.0);
+
+        // Redo
+        app.redo();
+        assert_eq!(app.annotations[0].x, 15.0);
+        assert_eq!(app.annotations[0].y, 15.0);
     }
 }
