@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use eframe::egui::{self, Key};
 
@@ -58,6 +58,7 @@ pub struct AnnotatorApp {
     pub dataset_folder: Option<PathBuf>,
     pub image_files: Vec<PathBuf>,
     pub current_image_idx: Option<usize>,
+    pub pending_image_idx: Option<usize>,
     pub auto_save_dataset: bool,
     pub annotation_counts: HashMap<PathBuf, usize>,
     pub thumbnail_cache: HashMap<PathBuf, egui::TextureHandle>,
@@ -87,6 +88,7 @@ impl AnnotatorApp {
             dataset_folder: None,
             image_files: Vec::new(),
             current_image_idx: None,
+            pending_image_idx: None,
             auto_save_dataset: true,
             annotation_counts: HashMap::new(),
             thumbnail_cache: HashMap::new(),
@@ -100,6 +102,59 @@ impl AnnotatorApp {
         if !self.thumbnail_cache.contains_key(path) {
             self.loader.request_thumbnail(path);
         }
+    }
+
+    fn poll_background_loads(&mut self, ctx: &egui::Context) {
+        let failures =
+            self.loader
+                .poll_results(ctx, &mut self.thumbnail_cache, &mut self.image_cache);
+        self.prune_image_cache();
+
+        let Some(pending_idx) = self.pending_image_idx else {
+            return;
+        };
+        let pending_path = self.image_files.get(pending_idx).cloned();
+
+        if pending_path
+            .as_ref()
+            .is_some_and(|path| self.image_cache.contains_key(path))
+        {
+            self.pending_image_idx = None;
+            if self.current_image_idx == Some(pending_idx) {
+                if let Some(image) = pending_path
+                    .as_ref()
+                    .and_then(|path| self.image_cache.get(path))
+                {
+                    self.image = Some(image.clone());
+                }
+            } else {
+                self.switch_to_image_index(ctx, pending_idx);
+            }
+        } else if let Some((path, error)) = failures
+            .into_iter()
+            .find(|(path, _)| pending_path.as_ref().is_some_and(|pending| pending == path))
+        {
+            self.pending_image_idx = None;
+            self.status = format!("COULD NOT OPEN IMAGE ({}): {error}", path.display());
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
+    }
+
+    fn prune_image_cache(&mut self) {
+        const CACHE_RADIUS: usize = 2;
+
+        let mut keep = HashSet::new();
+        for center in [self.current_image_idx, self.pending_image_idx]
+            .into_iter()
+            .flatten()
+        {
+            let start = center.saturating_sub(CACHE_RADIUS);
+            let end = (center + CACHE_RADIUS + 1).min(self.image_files.len());
+            keep.extend(self.image_files[start..end].iter().cloned());
+        }
+
+        self.image_cache.retain(|path, _| keep.contains(path));
     }
 
     pub fn preload_adjacent_images(&mut self) {
@@ -178,6 +233,8 @@ impl AnnotatorApp {
         self.image_cache.clear();
         self.annotations_cache.clear();
         self.loader.clear();
+        self.pending_image_idx = None;
+        self.current_image_idx = None;
         self.dataset_folder = Some(folder.clone());
         self.image_files = files;
         self.refresh_annotation_counts();
@@ -201,10 +258,35 @@ impl AnnotatorApp {
         let path = self.image_files[new_index].clone();
         let target_is_loaded = self.image.as_ref().is_some_and(|image| image.path == path);
         if self.current_image_idx == Some(new_index) && target_is_loaded {
+            if let Some(image) = self.image_cache.get(&path) {
+                self.image = Some(image.clone());
+                self.pending_image_idx = None;
+            }
+            return;
+        }
+
+        if !self.image_cache.contains_key(&path) {
+            self.auto_save_current_image();
+            self.current_image_idx = Some(new_index);
+            self.image = self.thumbnail_cache.get(&path).and_then(|texture| {
+                image::image_dimensions(&path)
+                    .ok()
+                    .map(|(width, height)| LoadedImage {
+                        texture: texture.clone(),
+                        path: path.clone(),
+                        width,
+                        height,
+                    })
+            });
+            self.load_image_state(&path);
+            self.loader.request_navigation_image(&path);
+            self.pending_image_idx = Some(new_index);
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
             return;
         }
 
         self.auto_save_current_image();
+        self.pending_image_idx = None;
         self.current_image_idx = Some(new_index);
         self.load_image_internal(ctx, path);
     }
@@ -267,6 +349,7 @@ impl AnnotatorApp {
     }
 
     pub fn load_image(&mut self, ctx: &egui::Context, path: PathBuf) {
+        self.pending_image_idx = None;
         self.auto_save_current_image();
 
         if let Some(parent) = path.parent() {
@@ -320,7 +403,11 @@ impl AnnotatorApp {
             }
         }
 
-        if let Some((cached_annos, desc, next_id)) = self.annotations_cache.get(&path) {
+        self.load_image_state(&path);
+    }
+
+    fn load_image_state(&mut self, path: &Path) {
+        if let Some((cached_annos, desc, next_id)) = self.annotations_cache.get(path) {
             self.annotations = cached_annos.clone();
             self.project_description = desc.clone();
             self.next_id = *next_id;
@@ -351,7 +438,7 @@ impl AnnotatorApp {
                 self.next_id = 1;
             }
             self.annotations_cache.insert(
-                path.clone(),
+                path.to_path_buf(),
                 (
                     self.annotations.clone(),
                     self.project_description.clone(),
@@ -360,7 +447,8 @@ impl AnnotatorApp {
             );
         }
 
-        self.annotation_counts.insert(path.clone(), self.annotations.len());
+        self.annotation_counts
+            .insert(path.to_path_buf(), self.annotations.len());
         self.selected = None;
         self.editing_label = None;
         self.active_drag = None;
@@ -389,6 +477,7 @@ impl AnnotatorApp {
     }
 
     pub fn load_project(&mut self, ctx: &egui::Context, path: &Path) {
+        self.pending_image_idx = None;
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(error) => {
@@ -530,6 +619,7 @@ impl AnnotatorApp {
             .and_then(|image_path| image_path.parent())
             .map(Path::to_path_buf);
         self.current_image_idx = None;
+        self.pending_image_idx = None;
         let initial_idx = batch.current_image_idx.min(self.image_files.len() - 1);
         self.switch_to_image_index(ctx, initial_idx);
         self.status = format!(
@@ -1013,7 +1103,7 @@ impl AnnotatorApp {
 
 impl eframe::App for AnnotatorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.loader.poll_results(ctx, &mut self.thumbnail_cache, &mut self.image_cache);
+        self.poll_background_loads(ctx);
         handle_native_menu_events(self, ctx);
         self.shortcuts_and_drops(ctx);
         render_bottom_bar(self, ctx);
@@ -1046,6 +1136,7 @@ mod tests {
             dataset_folder: None,
             image_files: Vec::new(),
             current_image_idx: None,
+            pending_image_idx: None,
             auto_save_dataset: true,
             annotation_counts: HashMap::new(),
             thumbnail_cache: HashMap::new(),
@@ -1181,6 +1272,84 @@ mod tests {
     }
 
     #[test]
+    fn test_switch_activates_uncached_image_without_blocking_for_decode() {
+        let ctx = egui::Context::default();
+        let mut app = test_app();
+        app.image_files = vec![
+            PathBuf::from("frame_01.png"),
+            PathBuf::from("frame_02.png"),
+        ];
+        app.current_image_idx = Some(0);
+
+        app.switch_to_image_index(&ctx, 1);
+
+        assert_eq!(app.current_image_idx, Some(1));
+        assert_eq!(app.pending_image_idx, Some(1));
+        assert!(!app.status.contains("LOADING"));
+    }
+
+    #[test]
+    fn test_failed_background_decode_releases_pending_navigation() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let invalid_path = std::env::temp_dir().join(format!("invalid_frame_{unique}.png"));
+        std::fs::write(&invalid_path, b"not an image").unwrap();
+
+        let ctx = egui::Context::default();
+        let mut app = test_app();
+        app.image_files = vec![invalid_path.clone()];
+        app.switch_to_image_index(&ctx, 0);
+
+        for _ in 0..100 {
+            app.poll_background_loads(&ctx);
+            if app.pending_image_idx.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+
+        assert_eq!(app.pending_image_idx, None);
+        assert!(app.status.contains("COULD NOT OPEN IMAGE"));
+        std::fs::remove_file(invalid_path).unwrap();
+    }
+
+    #[test]
+    fn test_full_image_cache_stays_near_active_navigation() {
+        let ctx = egui::Context::default();
+        let pixel = egui::ColorImage::new([1, 1], egui::Color32::WHITE);
+        let mut app = test_app();
+        app.image_files = (0..10)
+            .map(|idx| PathBuf::from(format!("frame_{idx:02}.png")))
+            .collect();
+        app.current_image_idx = Some(5);
+
+        for path in &app.image_files {
+            app.image_cache.insert(
+                path.clone(),
+                LoadedImage {
+                    texture: ctx.load_texture(
+                        path.to_string_lossy(),
+                        pixel.clone(),
+                        egui::TextureOptions::LINEAR,
+                    ),
+                    path: path.clone(),
+                    width: 1,
+                    height: 1,
+                },
+            );
+        }
+
+        app.prune_image_cache();
+
+        assert_eq!(app.image_cache.len(), 5);
+        for idx in 3..=7 {
+            assert!(app.image_cache.contains_key(&app.image_files[idx]));
+        }
+    }
+
+    #[test]
     fn test_export_unified_dataset_json() {
         let mut app = test_app();
         let path1 = PathBuf::from("frame_01.png");
@@ -1275,6 +1444,14 @@ mod tests {
         let ctx = egui::Context::default();
         let mut restored = test_app();
         restored.load_batch(&ctx, &batch_path);
+
+        for _ in 0..100 {
+            restored.poll_background_loads(&ctx);
+            if restored.pending_image_idx.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
 
         assert_eq!(restored.current_image_idx, Some(1));
         assert_eq!(restored.image.as_ref().map(|image| &image.path), Some(&path2));
