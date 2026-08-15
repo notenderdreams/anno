@@ -39,6 +39,7 @@ Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` /
 - `Cmd/Ctrl+Shift+Z` / `Cmd/Ctrl+Y` — redo
 - `Cmd/Ctrl+L` — lock or unlock selected layer/region(s)
 - `Delete` / `Backspace` — remove selected region(s)
+- `1` .. `9` — switch active class preset (or assign class preset to selected region(s))
 - `Escape` / `Cmd/Ctrl+D` — cancel drawing or deselect all
 - Scroll — zoom toward the cursor
 - `Space` + drag or middle-drag — pan

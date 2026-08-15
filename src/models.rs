@@ -53,6 +53,39 @@ impl Annotation {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ClassPreset {
+    pub prefix: String,
+    pub color: [u8; 3],
+}
+
+impl ClassPreset {
+    pub fn new(prefix: impl Into<String>, color: [u8; 3]) -> Self {
+        Self {
+            prefix: prefix.into(),
+            color,
+        }
+    }
+
+    pub fn color32(&self) -> Color32 {
+        Color32::from_rgb(self.color[0], self.color[1], self.color[2])
+    }
+}
+
+pub fn default_presets() -> Vec<ClassPreset> {
+    vec![
+        ClassPreset::new("object", [255, 0, 0]),      // 1: Red
+        ClassPreset::new("person", [41, 121, 255]),    // 2: Blue
+        ClassPreset::new("vehicle", [0, 230, 118]),   // 3: Green
+        ClassPreset::new("animal", [255, 214, 0]),    // 4: Yellow
+        ClassPreset::new("item", [255, 145, 0]),      // 5: Orange
+        ClassPreset::new("structure", [0, 229, 255]), // 6: Cyan
+        ClassPreset::new("sign", [213, 0, 249]),      // 7: Purple
+        ClassPreset::new("face", [255, 110, 64]),     // 8: Coral
+        ClassPreset::new("region", [118, 255, 3]),    // 9: Lime
+    ]
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {
     pub image: String,
     pub image_width: u32,
@@ -62,6 +95,8 @@ pub struct ProjectFile {
     #[serde(default = "default_next_id")]
     pub next_id: u32,
     pub annotations: Vec<Annotation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presets: Vec<ClassPreset>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -74,6 +109,8 @@ pub struct BatchProjectFile {
     #[serde(default)]
     pub current_image_idx: usize,
     pub images: Vec<ProjectFile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presets: Vec<ClassPreset>,
 }
 
 fn default_next_id() -> u32 {
@@ -212,6 +249,7 @@ mod tests {
             description: Some("Test project description".into()),
             next_id: 3,
             annotations: vec![annotation(1, None), annotation(2, Some(1))],
+            presets: Vec::new(),
         };
 
         let json_str = serde_json::to_string_pretty(&project).unwrap();

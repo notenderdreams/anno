@@ -56,6 +56,117 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 ui.add_space(8.0);
             }
 
+            let presets_open_id = ui.make_persistent_id("presets_section_open");
+            let mut presets_open: bool = ui.data_mut(|d| *d.get_temp_mut_or(presets_open_id, true));
+
+            ui.horizontal(|ui| {
+                let arrow = if presets_open { "▼" } else { "▶" };
+                if ui
+                    .add(egui::Button::new(RichText::new(arrow).monospace().size(8.0).color(MUTED)).frame(false))
+                    .clicked()
+                {
+                    presets_open = !presets_open;
+                    ui.data_mut(|d| d.insert_temp(presets_open_id, presets_open));
+                }
+                ui.label(
+                    RichText::new("CLASS PRESETS")
+                        .size(10.0)
+                        .strong()
+                        .color(MUTED),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(active) = app.presets.get(app.active_preset_idx) {
+                        ui.label(
+                            RichText::new(format!("[{}] {}", app.active_preset_idx + 1, active.prefix.to_uppercase()))
+                                .size(9.0)
+                                .monospace()
+                                .strong()
+                                .color(active.color32()),
+                        );
+                    }
+                });
+            });
+
+            if presets_open {
+                ui.add_space(4.0);
+                let mut apply_idx = None;
+
+                for idx in 0..app.presets.len() {
+                    let is_active = app.active_preset_idx == idx;
+                    let preset_color = app.presets[idx].color32();
+
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+
+                        let key_badge = format!("{}:", idx + 1);
+                        let badge_resp = ui.add(
+                            egui::Button::new(
+                                RichText::new(key_badge)
+                                    .size(9.0)
+                                    .monospace()
+                                    .color(if is_active { Color32::WHITE } else { MUTED }),
+                            )
+                            .fill(if is_active { Color32::from_gray(36) } else { Color32::TRANSPARENT })
+                            .frame(is_active),
+                        );
+                        if badge_resp.clicked() {
+                            apply_idx = Some(idx);
+                        }
+
+                        let popup_id = ui.make_persistent_id(format!("preset_color_picker_{idx}"));
+                        let (swatch_rect, swatch_resp) =
+                            ui.allocate_exact_size(Vec2::splat(12.0), Sense::click());
+                        if ui.is_rect_visible(swatch_rect) {
+                            ui.painter().rect_filled(swatch_rect, 2.0, preset_color);
+                            ui.painter().rect_stroke(
+                                swatch_rect,
+                                2.0,
+                                Stroke::new(1.0_f32, if is_active { Color32::WHITE } else { Color32::from_gray(60) }),
+                            );
+                        }
+                        if swatch_resp.clicked() {
+                            ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+                        }
+
+                        egui::popup_below_widget(
+                            ui,
+                            popup_id,
+                            &swatch_resp,
+                            egui::PopupCloseBehavior::CloseOnClickOutside,
+                            |ui| {
+                                ui.set_max_width(200.0);
+                                let mut color32 = preset_color;
+                                if egui::color_picker::color_picker_color32(
+                                    ui,
+                                    &mut color32,
+                                    egui::color_picker::Alpha::Opaque,
+                                ) {
+                                    app.presets[idx].color = [color32.r(), color32.g(), color32.b()];
+                                }
+                            },
+                        );
+
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(&mut app.presets[idx].prefix)
+                                .font(FontId::monospace(9.5))
+                                .desired_width(ui.available_width())
+                                .text_color(if is_active { Color32::WHITE } else { Color32::from_gray(190) }),
+                        );
+                        if edit.clicked() {
+                            apply_idx = Some(idx);
+                        }
+                    });
+                }
+
+                if let Some(idx) = apply_idx {
+                    app.apply_preset(idx);
+                }
+            }
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(8.0);
+
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new("SCENE HIERARCHY")

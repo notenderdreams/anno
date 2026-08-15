@@ -9,8 +9,9 @@ use crate::geometry::update_hierarchy;
 use crate::history::{AppSnapshot, History};
 use crate::menubar::{handle_native_menu_events, NativeMenuBar};
 use crate::models::{
-    export_annotation_tree, ActiveDrag, Annotation, AnnotationFile, BatchProjectFile, Draft,
-    LoadedImage, ProjectFile, UnifiedDatasetExport, UnifiedImageExport,
+    default_presets, export_annotation_tree, ActiveDrag, Annotation, AnnotationFile,
+    BatchProjectFile, ClassPreset, Draft, LoadedImage, ProjectFile, UnifiedDatasetExport,
+    UnifiedImageExport,
 };
 use crate::sidebar_left::render_left_sidebar;
 use crate::sidebar_right::render_right_sidebar;
@@ -66,6 +67,8 @@ pub struct AnnotatorApp {
     pub image_cache: HashMap<PathBuf, LoadedImage>,
     pub annotations_cache: HashMap<PathBuf, (Vec<Annotation>, Option<String>, u32)>,
     pub loader: BackgroundLoader,
+    pub presets: Vec<ClassPreset>,
+    pub active_preset_idx: usize,
 }
 
 impl AnnotatorApp {
@@ -97,6 +100,35 @@ impl AnnotatorApp {
             image_cache: HashMap::new(),
             annotations_cache: HashMap::new(),
             loader: BackgroundLoader::new(),
+            presets: default_presets(),
+            active_preset_idx: 0,
+        }
+    }
+
+    pub fn active_preset(&self) -> Option<&ClassPreset> {
+        self.presets.get(self.active_preset_idx)
+    }
+
+    pub fn apply_preset(&mut self, idx: usize) {
+        if idx >= self.presets.len() {
+            return;
+        }
+        self.active_preset_idx = idx;
+        let preset = self.presets[idx].clone();
+
+        if !self.selected.is_empty() {
+            self.history.record(self.current_snapshot());
+            let mut count = 0;
+            for a in self.annotations.iter_mut().filter(|a| self.selected.contains(&a.id) && !a.locked) {
+                a.color = preset.color;
+                a.label = format!("{}_{:02}", preset.prefix, a.id);
+                count += 1;
+            }
+            let prefix_upper = preset.prefix.to_uppercase();
+            self.status = format!("PRESET {}: {} APPLIED TO {} REGION(S)", idx + 1, prefix_upper, count);
+        } else {
+            let prefix_upper = preset.prefix.to_uppercase();
+            self.status = format!("ACTIVE PRESET: {} (KEY {})", prefix_upper, idx + 1);
         }
     }
 
@@ -409,6 +441,7 @@ impl AnnotatorApp {
             description: self.project_description.clone(),
             next_id: self.next_id,
             annotations: self.annotations.clone(),
+            presets: self.presets.clone(),
         };
 
         if let Ok(json) = serde_json::to_string_pretty(&project) {
@@ -586,6 +619,9 @@ impl AnnotatorApp {
                 });
                 self.project_description = project.description;
                 self.annotations = project.annotations;
+                if !project.presets.is_empty() {
+                    self.presets = project.presets;
+                }
                 update_hierarchy(&mut self.annotations);
                 let max_id = self.annotations.iter().map(|a| a.id).max().unwrap_or(0);
                 self.next_id = project.next_id.max(max_id + 1);
@@ -684,6 +720,9 @@ impl AnnotatorApp {
             );
         }
 
+        if !batch.presets.is_empty() {
+            self.presets = batch.presets;
+        }
         self.dataset_folder = self
             .image_files
             .first()
@@ -867,6 +906,7 @@ impl AnnotatorApp {
                     description,
                     next_id,
                     annotations,
+                    presets: Vec::new(),
                 }
             })
             .collect();
@@ -881,6 +921,7 @@ impl AnnotatorApp {
                 .map(|folder| folder.to_string_lossy().into_owned()),
             current_image_idx: self.current_image_idx.unwrap_or(0),
             images,
+            presets: self.presets.clone(),
         };
 
         match serde_json::to_string_pretty(&batch)
@@ -901,6 +942,7 @@ impl AnnotatorApp {
             description: self.project_description.clone(),
             next_id: self.next_id,
             annotations: self.annotations.clone(),
+            presets: self.presets.clone(),
         };
         match serde_json::to_string_pretty(&project)
             .map_err(|error| error.to_string())
@@ -1164,8 +1206,30 @@ impl AnnotatorApp {
         if export_dataset {
             self.export_unified_dataset_dialog();
         }
+        let digit_preset = ctx.input(|input| {
+            if input.modifiers.command || input.modifiers.ctrl || input.modifiers.alt {
+                None
+            } else {
+                [
+                    (Key::Num1, 0),
+                    (Key::Num2, 1),
+                    (Key::Num3, 2),
+                    (Key::Num4, 3),
+                    (Key::Num5, 4),
+                    (Key::Num6, 5),
+                    (Key::Num7, 6),
+                    (Key::Num8, 7),
+                    (Key::Num9, 8),
+                ]
+                .into_iter()
+                .find_map(|(k, idx)| if input.key_pressed(k) { Some(idx) } else { None })
+            }
+        });
+
         if !ctx.wants_keyboard_input() {
-            if redo {
+            if let Some(idx) = digit_preset {
+                self.apply_preset(idx);
+            } else if redo {
                 self.redo();
             } else if undo {
                 self.undo();
@@ -1250,6 +1314,8 @@ mod tests {
             image_cache: HashMap::new(),
             annotations_cache: HashMap::new(),
             loader: BackgroundLoader::new(),
+            presets: default_presets(),
+            active_preset_idx: 0,
         }
     }
 
@@ -1698,5 +1764,89 @@ mod tests {
         app.delete_selected();
         assert_eq!(app.annotations.len(), 1);
         assert_eq!(app.annotations[0].id, 1);
+    }
+
+    #[test]
+    fn test_apply_preset_without_selection_switches_active_preset() {
+        let mut app = test_app();
+        assert_eq!(app.active_preset_idx, 0);
+
+        // Switch to preset 2 (person)
+        app.apply_preset(1);
+        assert_eq!(app.active_preset_idx, 1);
+        assert!(app.status.contains("PERSON"));
+        assert_eq!(app.active_preset().unwrap().prefix, "person");
+
+        // Switch to preset 3 (vehicle)
+        app.apply_preset(2);
+        assert_eq!(app.active_preset_idx, 2);
+        assert!(app.status.contains("VEHICLE"));
+        assert_eq!(app.active_preset().unwrap().prefix, "vehicle");
+    }
+
+    #[test]
+    fn test_apply_preset_to_selected_annotations() {
+        let mut app = test_app();
+        app.annotations = vec![sample_annotation(1), sample_annotation(2), sample_annotation(3)];
+
+        // Select annotation 1 and 2
+        app.selected.insert(1);
+        app.selected.insert(2);
+
+        // Apply preset 2 (person, blue)
+        app.apply_preset(1);
+
+        assert_eq!(app.annotations[0].label, "person_01");
+        assert_eq!(app.annotations[0].color, [41, 121, 255]);
+        assert_eq!(app.annotations[1].label, "person_02");
+        assert_eq!(app.annotations[1].color, [41, 121, 255]);
+        assert_eq!(app.annotations[2].label, "region_3");
+        assert_eq!(app.annotations[2].color, [255, 0, 0]);
+        assert!(app.status.contains("PERSON APPLIED"));
+    }
+
+    #[test]
+    fn test_preset_undo_redo() {
+        let mut app = test_app();
+        app.annotations = vec![sample_annotation(1)];
+        app.selected.insert(1);
+
+        // Apply preset 3 (vehicle, green)
+        app.apply_preset(2);
+        assert_eq!(app.annotations[0].label, "vehicle_01");
+        assert_eq!(app.annotations[0].color, [0, 230, 118]);
+
+        // Undo
+        app.undo();
+        assert_eq!(app.annotations[0].label, "region_1");
+        assert_eq!(app.annotations[0].color, [255, 0, 0]);
+
+        // Redo
+        app.redo();
+        assert_eq!(app.annotations[0].label, "vehicle_01");
+        assert_eq!(app.annotations[0].color, [0, 230, 118]);
+    }
+
+    #[test]
+    fn test_preset_does_not_mutate_locked_annotations() {
+        let mut app = test_app();
+        let mut a1 = sample_annotation(1);
+        a1.locked = true;
+        let a2 = sample_annotation(2);
+        app.annotations = vec![a1, a2];
+
+        app.selected.insert(1);
+        app.selected.insert(2);
+
+        // Apply preset 2 (person)
+        app.apply_preset(1);
+
+        // Locked annotation 1 remains unchanged
+        assert_eq!(app.annotations[0].label, "region_1");
+        assert_eq!(app.annotations[0].color, [255, 0, 0]);
+
+        // Unlocked annotation 2 is updated
+        assert_eq!(app.annotations[1].label, "person_02");
+        assert_eq!(app.annotations[1].color, [41, 121, 255]);
     }
 }

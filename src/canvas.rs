@@ -459,15 +459,27 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         let id = app.next_id;
                         app.next_id += 1;
 
+                        let (prefix, color) = if let Some(preset) = app.presets.get(app.active_preset_idx) {
+                            (preset.prefix.clone(), preset.color)
+                        } else {
+                            ("object".to_string(), [255, 0, 0])
+                        };
+
+                        let label = if prefix.trim().is_empty() {
+                            format!("object_{id:02}")
+                        } else {
+                            format!("{prefix}_{id:02}")
+                        };
+
                         app.annotations.push(Annotation {
                             id,
-                            label: format!("object_{id:02}"),
+                            label,
                             description: None,
                             x: min.x.round(),
                             y: min.y.round(),
                             width: (max.x - min.x).round(),
                             height: (max.y - min.y).round(),
-                            color: [255, 0, 0],
+                            color,
                             parent_id: None,
                             locked: false,
                         });
@@ -569,11 +581,17 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
             }
 
             if let Some(draft) = &app.draft {
+                let (prefix, color) = if let Some(preset) = app.presets.get(app.active_preset_idx) {
+                    (preset.prefix.to_uppercase(), preset.color32())
+                } else {
+                    ("NEW REGION".to_string(), RED)
+                };
+                let draft_label = format!("{prefix} {:02}", app.next_id);
                 draw_surveillance_box(
                     &painter,
                     Rect::from_two_pos(draft.start, draft.current),
-                    "NEW REGION",
-                    RED,
+                    &draft_label,
+                    color,
                     true,
                     false,
                 );
@@ -609,6 +627,32 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 zoom_galley,
                 Color32::WHITE,
             );
+
+            if let Some(preset) = app.presets.get(app.active_preset_idx) {
+                let preset_label = format!("[{}] {}", app.active_preset_idx + 1, preset.prefix.to_uppercase());
+                let preset_galley = painter.layout_no_wrap(
+                    preset_label,
+                    FontId::monospace(9.0),
+                    Color32::WHITE,
+                );
+                let swatch_w = 8.0_f32;
+                let preset_pill_size = preset_galley.size() + Vec2::new(16.0 + swatch_w, 8.0);
+                let preset_rect = Rect::from_min_size(
+                    Pos2::new(zoom_rect.right() + 6.0, zoom_rect.min.y),
+                    preset_pill_size,
+                );
+                painter.rect_filled(preset_rect, 2.0, Color32::from_black_alpha(190));
+                let swatch_rect = Rect::from_center_size(
+                    Pos2::new(preset_rect.left() + 9.0, preset_rect.center().y),
+                    Vec2::splat(swatch_w),
+                );
+                painter.rect_filled(swatch_rect, 1.5, preset.color32());
+                painter.galley(
+                    Pos2::new(preset_rect.left() + 16.0, preset_rect.min.y + 4.0),
+                    preset_galley,
+                    Color32::WHITE,
+                );
+            }
 
             // Minimap Overview Overlay
             if show_minimap {
