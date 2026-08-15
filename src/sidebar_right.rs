@@ -32,6 +32,7 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
             if app.selected.len() == 1 {
                 let selected_id = *app.selected.iter().next().unwrap();
                 let mut should_delete = false;
+                let mut should_convert_to_poly = false;
                 let mut bounds_changed = false;
                 let other_labels: Vec<(u32, String)> = app.annotations.iter().map(|a| (a.id, a.label.clone())).collect();
 
@@ -369,11 +370,35 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             });
                     });
 
-                    ui.add_space(16.0);
+                    if annotation.points.is_none() {
+                        ui.add_space(10.0);
+                        ui.add_enabled_ui(!is_locked, |ui| {
+                            if ui
+                                .add_sized(
+                                    [ui.available_width(), 26.0],
+                                    egui::Button::new(
+                                        RichText::new("CONVERT TO POLYGON")
+                                            .size(9.0)
+                                            .monospace()
+                                            .strong()
+                                            .color(Color32::from_rgb(100, 180, 255)),
+                                    )
+                                    .fill(Color32::from_rgb(20, 35, 60))
+                                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(50, 100, 200)))
+                                    .rounding(2.0),
+                                )
+                                .clicked()
+                            {
+                                should_convert_to_poly = true;
+                            }
+                        });
+                    }
+
+                    ui.add_space(8.0);
                     ui.add_enabled_ui(!is_locked, |ui| {
                         if ui
                             .add_sized(
-                                [ui.available_width(), 30.0],
+                                [ui.available_width(), 28.0],
                                 egui::Button::new(RichText::new("DELETE REGION").size(10.0).color(RED)),
                             )
                             .clicked()
@@ -381,6 +406,10 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             should_delete = true;
                         }
                     });
+                }
+
+                if should_convert_to_poly {
+                    app.convert_selected_to_polygon();
                 }
 
                 if bounds_changed {
@@ -717,7 +746,36 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 });
 
 
-                ui.add_space(14.0);
+                let num_rects = app
+                    .annotations
+                    .iter()
+                    .filter(|a| app.selected.contains(&a.id) && !a.locked && a.points.is_none())
+                    .count();
+                let mut should_convert_to_poly = false;
+
+                if num_rects > 0 {
+                    ui.add_space(8.0);
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 26.0],
+                            egui::Button::new(
+                                RichText::new(format!("CONVERT {num_rects} TO POLYGON"))
+                                    .size(9.0)
+                                    .monospace()
+                                    .strong()
+                                    .color(Color32::from_rgb(100, 180, 255)),
+                            )
+                            .fill(Color32::from_rgb(20, 35, 60))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(50, 100, 200)))
+                            .rounding(2.0),
+                        )
+                        .clicked()
+                    {
+                        should_convert_to_poly = true;
+                    }
+                }
+
+                ui.add_space(10.0);
                 if ui
                     .add_sized(
                         [ui.available_width(), 30.0],
@@ -737,6 +795,10 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     .clicked()
                 {
                     app.deselect_all();
+                }
+
+                if should_convert_to_poly {
+                    app.convert_selected_to_polygon();
                 }
 
                 if let Some(color) = picked_color {

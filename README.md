@@ -28,6 +28,8 @@ Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` /
 - `V` — switch to **Select / Transform tool** (select, move, resize, marquee select, and refine polygon vertices)
 - `B` — switch to **Box / Rectangle drawing tool** (drag to draw bounding boxes)
 - `P` — switch to **Polygon / Multi-Point drawing tool** (click points, 3+ to close; click start point or press `Enter` to finish; `Esc` / right-click to undo point)
+- **Convert Rectangle to Polygon**:
+  - Click **`CONVERT TO POLYGON`** in the right inspector panel (or press `Shift+P`) to convert rectangles to editable multi-point polygons.
 - **Refine Polygon Vertices** (in Select mode `V`):
   - Drag vertex — move individual vertex to reshape polygon
   - Double-click edge — insert a new vertex along that edge

@@ -357,6 +357,42 @@ impl AnnotatorApp {
         self.status = format!("{} REGION(S) {}", self.selected.len(), action_str);
     }
 
+    pub fn convert_selected_to_polygon(&mut self) -> bool {
+        let target_ids: Vec<u32> = self
+            .annotations
+            .iter()
+            .filter(|a| self.selected.contains(&a.id) && !a.locked && a.points.is_none())
+            .map(|a| a.id)
+            .collect();
+
+        if target_ids.is_empty() {
+            return false;
+        }
+
+        self.history.record(self.current_snapshot());
+
+        for a in self.annotations.iter_mut().filter(|a| target_ids.contains(&a.id)) {
+            let x = a.x;
+            let y = a.y;
+            let w = a.width;
+            let h = a.height;
+            a.points = Some(vec![
+                [x, y],
+                [x + w, y],
+                [x + w, y + h],
+                [x, y + h],
+            ]);
+        }
+
+        self.status = if target_ids.len() == 1 {
+            "CONVERTED RECTANGLE TO POLYGON (REFINABLE WITH VERTEX HANDLES)".to_string()
+        } else {
+            format!("CONVERTED {} RECTANGLES TO POLYGONS", target_ids.len())
+        };
+
+        true
+    }
+
     pub fn request_thumbnail(&mut self, path: &Path) {
         if !self.thumbnail_cache.contains_key(path) {
             self.loader.request_thumbnail(path);
@@ -1473,6 +1509,11 @@ impl AnnotatorApp {
             )
         });
 
+        let convert_to_poly = ctx.input(|input| {
+            let shift_only = !input.modifiers.command && !input.modifiers.ctrl && !input.modifiers.alt && input.modifiers.shift;
+            shift_only && input.key_pressed(Key::P)
+        });
+
         let (arrow_left, arrow_right, arrow_up, arrow_down, arrow_shift) = ctx.input(|input| {
             let no_cmd_ctrl_alt = !input.modifiers.command && !input.modifiers.ctrl && !input.modifiers.alt;
             (
@@ -1503,6 +1544,8 @@ impl AnnotatorApp {
 
             if (nudge_x != 0.0 || nudge_y != 0.0) && !self.selected.is_empty() && self.editing_label.is_none() && self.autocomplete_nav.is_none() {
                 self.nudge_selected(nudge_x, nudge_y);
+            } else if convert_to_poly && !self.selected.is_empty() && self.editing_label.is_none() && self.autocomplete_nav.is_none() {
+                self.convert_selected_to_polygon();
             } else if let Some(idx) = digit_preset {
                 self.apply_preset(idx);
             } else if tool_select {
@@ -2598,5 +2641,55 @@ mod tests {
         app.redo();
         assert_eq!(app.annotations[0].x, 15.0);
         assert_eq!(app.annotations[0].y, 15.0);
+    }
+
+    #[test]
+    fn test_convert_rectangle_to_polygon() {
+        let mut app = test_app();
+        app.annotations.push(sample_annotation(1)); // x: 10, y: 10, w: 50, h: 50
+        app.select_single(1);
+
+        assert!(app.annotations[0].points.is_none());
+        assert!(app.convert_selected_to_polygon());
+
+        let pts = app.annotations[0].points.as_ref().unwrap();
+        assert_eq!(pts.len(), 4);
+        assert_eq!(pts[0], [10.0, 10.0]);
+        assert_eq!(pts[1], [60.0, 10.0]);
+        assert_eq!(pts[2], [60.0, 60.0]);
+        assert_eq!(pts[3], [10.0, 60.0]);
+
+        // Calling again does nothing because it's already a polygon
+        assert!(!app.convert_selected_to_polygon());
+    }
+
+    #[test]
+    fn test_convert_rectangle_to_polygon_undo_redo() {
+        let mut app = test_app();
+        app.annotations.push(sample_annotation(1));
+        app.select_single(1);
+
+        assert!(app.convert_selected_to_polygon());
+        assert!(app.annotations[0].points.is_some());
+
+        // Undo restores rectangle
+        app.undo();
+        assert!(app.annotations[0].points.is_none());
+
+        // Redo restores polygon
+        app.redo();
+        assert!(app.annotations[0].points.is_some());
+    }
+
+    #[test]
+    fn test_convert_locked_rectangle_protected() {
+        let mut app = test_app();
+        let mut anno = sample_annotation(1);
+        anno.locked = true;
+        app.annotations.push(anno);
+        app.select_single(1);
+
+        assert!(!app.convert_selected_to_polygon());
+        assert!(app.annotations[0].points.is_none());
     }
 }
