@@ -2,6 +2,13 @@ use eframe::egui::{Color32, Pos2, TextureHandle};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ToolMode {
+    #[default]
+    Rectangle,
+    Polygon,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum ResizeHandle {
     TopLeft,
@@ -12,7 +19,7 @@ pub enum ResizeHandle {
 
 pub enum ActiveDrag {
     Move {
-        initial_positions: Vec<(u32, f32, f32)>,
+        initial_positions: Vec<(u32, f32, f32, Option<Vec<[f32; 2]>>)>,
         start_pointer: Pos2,
     },
     Resize {
@@ -23,6 +30,7 @@ pub enum ActiveDrag {
         initial_y: f32,
         initial_w: f32,
         initial_h: f32,
+        initial_points: Option<Vec<[f32; 2]>>,
     },
     MinimapPan {
         start_pointer: Pos2,
@@ -44,6 +52,8 @@ pub struct Annotation {
     pub parent_id: Option<u32>,
     #[serde(default)]
     pub locked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<[f32; 2]>>,
 }
 
 impl Annotation {
@@ -263,6 +273,8 @@ pub struct ExportAnnotation<'a> {
     pub width: f32,
     pub height: f32,
     pub color: [u8; 3],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub points: Option<&'a [[f32; 2]]>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<ExportAnnotation<'a>>,
 }
@@ -294,6 +306,7 @@ fn export_annotation<'a>(
         width: annotation.width,
         height: annotation.height,
         color: annotation.color,
+        points: annotation.points.as_deref(),
         children,
     }
 }
@@ -309,6 +322,11 @@ pub struct LoadedImage {
 pub struct Draft {
     pub start: Pos2,
     pub current: Pos2,
+}
+
+#[derive(Clone, Debug)]
+pub struct DraftPolygon {
+    pub points: Vec<Pos2>,
 }
 
 #[cfg(test)]
@@ -327,7 +345,20 @@ mod tests {
             color: [255, 0, 0],
             parent_id,
             locked: false,
+            points: None,
         }
+    }
+
+    #[test]
+    fn test_polygon_annotation_export() {
+        let mut poly = annotation(1, None);
+        poly.points = Some(vec![[10.0, 20.0], [50.0, 20.0], [30.0, 60.0]]);
+
+        let json = serde_json::to_value(export_annotation_tree(&[poly])).unwrap();
+        assert_eq!(
+            json[0]["points"],
+            serde_json::json!([[10.0, 20.0], [50.0, 20.0], [30.0, 60.0]])
+        );
     }
 
     #[test]

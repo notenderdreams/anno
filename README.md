@@ -24,6 +24,8 @@ Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` /
 
 ## Controls
 
+- `B` — switch to Box / Rectangle drawing tool
+- `P` — switch to Polygon / Multi-Point drawing tool (click points, 3+ to close; click start point or press `Enter` to finish; `Esc` / right-click to undo point)
 - `Cmd/Ctrl+O` — open an image
 - `Cmd/Ctrl+Option+O` / `Cmd+Shift+F` — open folder dataset
 - `A` / `[` — previous image in dataset
@@ -38,8 +40,8 @@ Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` /
 - `Cmd/Ctrl+Z` — undo
 - `Cmd/Ctrl+Shift+Z` / `Cmd/Ctrl+Y` — redo
 - `Cmd/Ctrl+L` — lock or unlock selected layer/region(s)
-- `Delete` / `Backspace` — remove selected region(s)
-- `Enter` — rename selected region (when a single region is selected)
+- `Delete` / `Backspace` — remove selected region(s) (or remove last placed polygon vertex when drawing)
+- `Enter` — rename selected region (when a single region is selected) or close polygon draft (when >= 3 points)
 - `1` .. `9` — switch active class preset (or assign class preset to selected region(s))
 - `↑` / `↓` and `Enter` / `Tab` — navigate and select autocomplete class suggestions when editing labels
 - `Escape` / `Cmd/Ctrl+D` — cancel drawing or deselect all

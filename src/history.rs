@@ -81,14 +81,18 @@ impl History {
         }
     }
 
-    /// Discard any active pending edit without pushing to undo stack.
-    pub fn cancel_edit(&mut self) {
-        self.pending_edit = None;
+    pub fn has_pending_edit(&self) -> bool {
+        self.pending_edit.is_some()
     }
 
-    /// Perform undo. Pushes `current` state to redo stack and returns the previous state.
+    /// Perform undo. If an uncommitted pending edit was active, commits the baseline
+    /// then restores the previous state.
     pub fn undo(&mut self, current: AppSnapshot) -> Option<AppSnapshot> {
-        self.pending_edit = None;
+        if let Some(before) = self.pending_edit.take() {
+            if before != current {
+                self.undo_stack.push(before);
+            }
+        }
         let previous = self.undo_stack.pop()?;
         self.redo_stack.push(current);
         if self.redo_stack.len() > self.max_capacity {
@@ -147,6 +151,7 @@ mod tests {
             color: [255, 0, 0],
             parent_id: None,
             locked: false,
+            points: None,
         }
     }
 

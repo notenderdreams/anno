@@ -324,7 +324,19 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     });
 
                     ui.add_space(12.0);
-                    ui.label(RichText::new("BOUNDS (PX)").size(9.0).color(MUTED));
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("BOUNDS (PX)").size(9.0).color(MUTED));
+                        if let Some(pts) = &annotation.points {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    RichText::new(format!("POLYGON ({} PTS)", pts.len()))
+                                        .size(8.5)
+                                        .monospace()
+                                        .color(Color32::from_rgb(100, 180, 255)),
+                                );
+                            });
+                        }
+                    });
                     ui.add_space(4.0);
 
                     let is_locked = annotation.locked;

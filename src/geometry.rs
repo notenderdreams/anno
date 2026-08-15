@@ -70,3 +70,82 @@ pub fn update_hierarchy(annotations: &mut [Annotation]) {
         item.parent_id = best_parent_id;
     }
 }
+
+pub fn image_to_screen(point: Pos2, image_rect: Rect, image_size: Vec2) -> Pos2 {
+    Pos2::new(
+        image_rect.left() + (point.x / image_size.x) * image_rect.width(),
+        image_rect.top() + (point.y / image_size.y) * image_rect.height(),
+    )
+}
+
+pub fn point_in_polygon(point: Pos2, vertices: &[Pos2]) -> bool {
+    if vertices.len() < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = vertices.len() - 1;
+    for i in 0..vertices.len() {
+        let pi = vertices[i];
+        let pj = vertices[j];
+        if ((pi.y > point.y) != (pj.y > point.y))
+            && (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x)
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+pub fn polygon_bounding_box(points: &[Pos2]) -> (f32, f32, f32, f32) {
+    if points.is_empty() {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    let mut min_x = f32::MAX;
+    let mut min_y = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut max_y = f32::MIN;
+    for p in points {
+        min_x = min_x.min(p.x);
+        min_y = min_y.min(p.y);
+        max_x = max_x.max(p.x);
+        max_y = max_y.max(p.y);
+    }
+    (min_x, min_y, (max_x - min_x).max(1.0), (max_y - min_y).max(1.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_point_in_polygon() {
+        let triangle = vec![
+            Pos2::new(0.0, 0.0),
+            Pos2::new(10.0, 0.0),
+            Pos2::new(5.0, 10.0),
+        ];
+
+        // Center inside
+        assert!(point_in_polygon(Pos2::new(5.0, 3.0), &triangle));
+
+        // Outside
+        assert!(!point_in_polygon(Pos2::new(0.0, 10.0), &triangle));
+        assert!(!point_in_polygon(Pos2::new(15.0, 5.0), &triangle));
+    }
+
+    #[test]
+    fn test_polygon_bounding_box() {
+        let points = vec![
+            Pos2::new(10.0, 20.0),
+            Pos2::new(50.0, 80.0),
+            Pos2::new(30.0, 10.0),
+        ];
+
+        let (x, y, w, h) = polygon_bounding_box(&points);
+        assert_eq!(x, 10.0);
+        assert_eq!(y, 10.0);
+        assert_eq!(w, 40.0);
+        assert_eq!(h, 70.0);
+    }
+}

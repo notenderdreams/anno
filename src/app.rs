@@ -9,9 +9,9 @@ use crate::geometry::update_hierarchy;
 use crate::history::{AppSnapshot, History};
 use crate::menubar::{handle_native_menu_events, NativeMenuBar};
 use crate::models::{
-    assign_preset_to_annotations, default_presets, export_annotation_tree,
-    ActiveDrag, Annotation, AnnotationFile, BatchProjectFile, ClassPreset, Draft, LoadedImage,
-    ProjectFile, UnifiedDatasetExport, UnifiedImageExport,
+    assign_preset_to_annotations, default_presets, export_annotation_tree, next_category_label,
+    ActiveDrag, Annotation, AnnotationFile, BatchProjectFile, ClassPreset, Draft, DraftPolygon,
+    LoadedImage, ProjectFile, ToolMode, UnifiedDatasetExport, UnifiedImageExport,
 };
 use crate::sidebar_left::render_left_sidebar;
 use crate::sidebar_right::render_right_sidebar;
@@ -24,18 +24,9 @@ fn resolve_image_path(anno_path: &Path, image_str: &str) -> PathBuf {
         return raw_path;
     }
 
-    if let Some(parent) = anno_path.parent() {
-        let relative = parent.join(&raw_path);
-        if relative.exists() {
-            return relative;
-        }
-
-        if let Some(file_name) = raw_path.file_name() {
-            let in_same_dir = parent.join(file_name);
-            if in_same_dir.exists() {
-                return in_same_dir;
-            }
-        }
+    let candidate = anno_path.parent().unwrap_or(Path::new("")).join(&raw_path);
+    if candidate.exists() {
+        return candidate;
     }
 
     raw_path
@@ -47,7 +38,9 @@ pub struct AnnotatorApp {
     pub selected: HashSet<u32>,
     pub editing_label: Option<u32>,
     pub next_id: u32,
+    pub tool_mode: ToolMode,
     pub draft: Option<Draft>,
+    pub draft_polygon: Option<DraftPolygon>,
     pub marquee: Option<Draft>,
     pub active_drag: Option<ActiveDrag>,
     pub zoom: f32,
@@ -81,7 +74,9 @@ impl AnnotatorApp {
             selected: HashSet::new(),
             editing_label: None,
             next_id: 1,
+            tool_mode: ToolMode::Rectangle,
             draft: None,
+            draft_polygon: None,
             marquee: None,
             active_drag: None,
             zoom: 1.0,
@@ -105,6 +100,55 @@ impl AnnotatorApp {
             active_preset_idx: 0,
             autocomplete_nav: None,
         }
+    }
+
+    pub fn finish_draft_polygon(&mut self) -> bool {
+        let Some(poly) = self.draft_polygon.take() else {
+            return false;
+        };
+        if poly.points.len() < 3 {
+            return false;
+        }
+
+        self.history.record(self.current_snapshot());
+
+        let (x, y, w, h) = crate::geometry::polygon_bounding_box(&poly.points);
+        let id = self.next_id;
+        self.next_id += 1;
+
+        let (prefix, color) = if let Some(preset) = self.presets.get(self.active_preset_idx) {
+            (preset.prefix.clone(), preset.color)
+        } else {
+            ("object".to_string(), [255, 0, 0])
+        };
+
+        let label = next_category_label(&prefix, &self.annotations, None);
+        let points_array: Vec<[f32; 2]> = poly
+            .points
+            .iter()
+            .map(|p| [p.x.round(), p.y.round()])
+            .collect();
+
+        self.annotations.push(Annotation {
+            id,
+            label,
+            description: None,
+            x: x.round(),
+            y: y.round(),
+            width: w.round(),
+            height: h.round(),
+            color,
+            parent_id: None,
+            locked: false,
+            points: Some(points_array),
+        });
+
+        self.select_single(id);
+        self.editing_label = Some(id);
+        self.request_label_focus = true;
+        self.status = format!("POLYGON REGION {id:02} CREATED");
+        update_hierarchy(&mut self.annotations);
+        true
     }
 
     pub fn active_preset(&self) -> Option<&ClassPreset> {
@@ -746,10 +790,17 @@ impl AnnotatorApp {
         self.editing_label = None;
         self.active_drag = None;
         self.draft = None;
+        self.draft_polygon = None;
         self.marquee = None;
     }
 
     pub fn undo(&mut self) {
+        self.editing_label = None;
+        self.draft_polygon = None;
+        self.draft = None;
+        self.marquee = None;
+        self.active_drag = None;
+
         let current = self.current_snapshot();
         if let Some(snapshot) = self.history.undo(current) {
             self.apply_snapshot(snapshot);
@@ -758,6 +809,12 @@ impl AnnotatorApp {
     }
 
     pub fn redo(&mut self) {
+        self.editing_label = None;
+        self.draft_polygon = None;
+        self.draft = None;
+        self.marquee = None;
+        self.active_drag = None;
+
         let current = self.current_snapshot();
         if let Some(snapshot) = self.history.redo(current) {
             self.apply_snapshot(snapshot);
@@ -1198,6 +1255,22 @@ impl AnnotatorApp {
         if export_dataset {
             self.export_unified_dataset_dialog();
         }
+        if undo {
+            self.undo();
+        }
+        if redo {
+            self.redo();
+        }
+        if select_all {
+            self.select_all();
+        }
+        if deselect {
+            self.deselect_all();
+        }
+        if toggle_lock {
+            self.toggle_lock_selected();
+        }
+
         let digit_preset = ctx.input(|input| {
             if input.modifiers.command || input.modifiers.ctrl || input.modifiers.alt {
                 None
@@ -1218,9 +1291,25 @@ impl AnnotatorApp {
             }
         });
 
+        let (tool_rect, tool_poly) = ctx.input(|input| {
+            let no_mod = !input.modifiers.command && !input.modifiers.ctrl && !input.modifiers.shift && !input.modifiers.alt;
+            (no_mod && input.key_pressed(Key::B), no_mod && input.key_pressed(Key::P))
+        });
+
         if !ctx.wants_keyboard_input() {
             if let Some(idx) = digit_preset {
                 self.apply_preset(idx);
+            } else if tool_rect {
+                self.tool_mode = ToolMode::Rectangle;
+                self.draft_polygon = None;
+                self.status = "BOX TOOL SELECTED (DRAG TO DRAW)".to_string();
+            } else if tool_poly {
+                self.tool_mode = ToolMode::Polygon;
+                self.draft = None;
+                self.status = "POLYGON TOOL SELECTED (CLICK TO PLACE POINTS, 3+ TO CLOSE)".to_string();
+            } else if enter && self.draft_polygon.as_ref().map_or(false, |p| p.points.len() >= 3) {
+                ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                self.finish_draft_polygon();
             } else if enter && self.selected.len() == 1 {
                 let id = *self.selected.iter().next().unwrap();
                 let is_locked = self.annotations.iter().find(|a| a.id == id).map_or(false, |a| a.locked);
@@ -1230,18 +1319,18 @@ impl AnnotatorApp {
                     self.editing_label = Some(id);
                     self.request_label_focus = true;
                 }
-            } else if redo {
-                self.redo();
-            } else if undo {
-                self.undo();
             } else if delete {
-                self.delete_selected();
-            } else if select_all {
-                self.select_all();
-            } else if deselect {
-                self.deselect_all();
-            } else if toggle_lock {
-                self.toggle_lock_selected();
+                if let Some(poly) = &mut self.draft_polygon {
+                    poly.points.pop();
+                    if poly.points.is_empty() {
+                        self.draft_polygon = None;
+                        self.status = "POLYGON DRAWING CANCELED".to_string();
+                    } else {
+                        self.status = format!("POINT REMOVED ({} REMAINING)", poly.points.len());
+                    }
+                } else {
+                    self.delete_selected();
+                }
             } else if prev_img {
                 self.previous_image(ctx);
             } else if next_img {
@@ -1250,6 +1339,7 @@ impl AnnotatorApp {
         }
         if escape {
             self.draft = None;
+            self.draft_polygon = None;
             self.marquee = None;
             self.active_drag = None;
             self.editing_label = None;
@@ -1286,6 +1376,7 @@ impl eframe::App for AnnotatorApp {
 mod tests {
     use super::*;
     use crate::models::{match_class_presets, next_category_label, BatchProjectFile};
+    use eframe::egui::Pos2;
     use std::path::PathBuf;
 
     fn test_app() -> AnnotatorApp {
@@ -1296,7 +1387,9 @@ mod tests {
             selected: HashSet::new(),
             editing_label: None,
             next_id: 1,
+            tool_mode: ToolMode::Rectangle,
             draft: None,
+            draft_polygon: None,
             marquee: None,
             active_drag: None,
             zoom: 1.0,
@@ -1333,6 +1426,7 @@ mod tests {
             color: [255, 0, 0],
             parent_id: None,
             locked: false,
+            points: None,
         }
     }
 
@@ -1922,5 +2016,102 @@ mod tests {
 
         let is_batch = app.dataset_folder.is_some() || app.image_files.len() > 1;
         assert!(!is_batch);
+    }
+
+    #[test]
+    fn test_finish_draft_polygon() {
+        let mut app = test_app();
+        app.draft_polygon = Some(DraftPolygon {
+            points: vec![
+                Pos2::new(10.0, 10.0),
+                Pos2::new(40.0, 10.0),
+                Pos2::new(40.0, 50.0),
+                Pos2::new(10.0, 50.0),
+            ],
+        });
+
+        let success = app.finish_draft_polygon();
+        assert!(success);
+        assert_eq!(app.annotations.len(), 1);
+        let poly_anno = &app.annotations[0];
+        assert_eq!(poly_anno.id, 1);
+        assert_eq!(poly_anno.x, 10.0);
+        assert_eq!(poly_anno.y, 10.0);
+        assert_eq!(poly_anno.width, 30.0);
+        assert_eq!(poly_anno.height, 40.0);
+        assert!(poly_anno.points.is_some());
+        assert_eq!(poly_anno.points.as_ref().unwrap().len(), 4);
+        assert_eq!(app.selected.len(), 1);
+        assert_eq!(app.editing_label, Some(1));
+    }
+
+    #[test]
+    fn test_finish_draft_polygon_requires_minimum_3_points() {
+        let mut app = test_app();
+        app.draft_polygon = Some(DraftPolygon {
+            points: vec![Pos2::new(10.0, 10.0), Pos2::new(40.0, 10.0)],
+        });
+
+        // 2 points is not a polygon region
+        let success = app.finish_draft_polygon();
+        assert!(!success);
+        assert!(app.annotations.is_empty());
+    }
+
+    #[test]
+    fn test_tool_mode_switching_and_cancellation() {
+        let mut app = test_app();
+        assert_eq!(app.tool_mode, ToolMode::Rectangle);
+
+        // Switch to polygon mode
+        app.tool_mode = ToolMode::Polygon;
+        assert_eq!(app.tool_mode, ToolMode::Polygon);
+
+        app.draft_polygon = Some(DraftPolygon {
+            points: vec![Pos2::new(5.0, 5.0), Pos2::new(15.0, 5.0)],
+        });
+
+        // Pop last point (simulating Backspace)
+        if let Some(poly) = &mut app.draft_polygon {
+            poly.points.pop();
+        }
+        assert_eq!(app.draft_polygon.as_ref().unwrap().points.len(), 1);
+
+        // Cancel (simulating Escape)
+        app.draft_polygon = None;
+        assert!(app.draft_polygon.is_none());
+    }
+
+    #[test]
+    fn test_polygon_undo_redo() {
+        let mut app = test_app();
+        assert_eq!(app.annotations.len(), 0);
+        assert!(!app.can_undo());
+
+        app.draft_polygon = Some(DraftPolygon {
+            points: vec![
+                Pos2::new(10.0, 10.0),
+                Pos2::new(40.0, 10.0),
+                Pos2::new(40.0, 50.0),
+            ],
+        });
+
+        assert!(app.finish_draft_polygon());
+        assert_eq!(app.annotations.len(), 1);
+        assert!(app.can_undo());
+
+        // Undo polygon creation
+        app.undo();
+        assert_eq!(app.annotations.len(), 0);
+        assert!(!app.can_undo());
+        assert!(app.can_redo());
+
+        // Redo polygon creation
+        app.redo();
+        assert_eq!(app.annotations.len(), 1);
+        assert!(app.annotations[0].points.is_some());
+        assert_eq!(app.annotations[0].points.as_ref().unwrap().len(), 3);
+        assert!(app.can_undo());
+        assert!(!app.can_redo());
     }
 }

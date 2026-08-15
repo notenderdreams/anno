@@ -1,5 +1,6 @@
 use eframe::egui::{self, Color32, FontFamily, FontId, Margin, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use crate::app::AnnotatorApp;
+use crate::models::ToolMode;
 use crate::render::draw_lucide_lock;
 use crate::theme::{MUTED, PANEL, RED};
 
@@ -14,6 +15,58 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
         )
         .show(ctx, |ui| {
             ui.add_space(4.0);
+
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("DRAWING TOOL")
+                        .size(10.0)
+                        .strong()
+                        .color(MUTED),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let is_poly = app.tool_mode == ToolMode::Polygon;
+                    let poly_btn = ui.add_sized(
+                        Vec2::new(76.0, 18.0),
+                        egui::Button::new(
+                            RichText::new("POLYGON [P]")
+                                .size(8.5)
+                                .monospace()
+                                .strong()
+                                .color(if is_poly { Color32::WHITE } else { MUTED }),
+                        )
+                        .fill(if is_poly { Color32::from_rgb(30, 60, 120) } else { Color32::from_gray(24) })
+                        .stroke(Stroke::new(1.0_f32, if is_poly { Color32::from_rgb(70, 130, 240) } else { Color32::from_gray(45) })),
+                    );
+                    if poly_btn.clicked() {
+                        app.tool_mode = ToolMode::Polygon;
+                        app.draft = None;
+                        app.status = "POLYGON TOOL (CLICK TO PLACE POINTS, 3+ TO CLOSE)".into();
+                    }
+
+                    let is_rect = app.tool_mode == ToolMode::Rectangle;
+                    let rect_btn = ui.add_sized(
+                        Vec2::new(54.0, 18.0),
+                        egui::Button::new(
+                            RichText::new("BOX [B]")
+                                .size(8.5)
+                                .monospace()
+                                .strong()
+                                .color(if is_rect { Color32::WHITE } else { MUTED }),
+                        )
+                        .fill(if is_rect { Color32::from_rgb(30, 60, 120) } else { Color32::from_gray(24) })
+                        .stroke(Stroke::new(1.0_f32, if is_rect { Color32::from_rgb(70, 130, 240) } else { Color32::from_gray(45) })),
+                    );
+                    if rect_btn.clicked() {
+                        app.tool_mode = ToolMode::Rectangle;
+                        app.draft_polygon = None;
+                        app.status = "BOX TOOL (DRAG TO DRAW)".into();
+                    }
+                });
+            });
+
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(6.0);
 
             if !app.image_files.is_empty() {
                 let current_idx = app.current_image_idx.unwrap_or(0);

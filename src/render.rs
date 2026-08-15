@@ -120,3 +120,171 @@ pub fn draw_surveillance_box(
         }
     }
 }
+
+pub fn draw_polygon_annotation(
+    painter: &egui::Painter,
+    screen_points: &[Pos2],
+    bounding_rect: Rect,
+    label: &str,
+    box_color: Color32,
+    selected: bool,
+    locked: bool,
+) {
+    if screen_points.len() < 2 {
+        return;
+    }
+
+    let color = if selected {
+        box_color
+    } else {
+        Color32::from_rgb(
+            (box_color.r() as f32 * 0.75) as u8,
+            (box_color.g() as f32 * 0.75) as u8,
+            (box_color.b() as f32 * 0.75) as u8,
+        )
+    };
+
+    // Semi-transparent polygon fill
+    if screen_points.len() >= 3 {
+        let fill_alpha = if selected { 45 } else { 25 };
+        let fill_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), fill_alpha);
+        painter.add(egui::Shape::convex_polygon(screen_points.to_vec(), fill_color, Stroke::NONE));
+    }
+
+    // Polygon boundary outline
+    let stroke_w = if selected { 1.8_f32 } else { 1.15_f32 };
+    for w in screen_points.windows(2) {
+        painter.line_segment([w[0], w[1]], Stroke::new(stroke_w, color));
+    }
+    if screen_points.len() >= 3 {
+        painter.line_segment(
+            [screen_points[screen_points.len() - 1], screen_points[0]],
+            Stroke::new(stroke_w, color),
+        );
+    }
+
+    // Vertex handles
+    let dot_radius = if selected { 3.5_f32 } else { 2.2_f32 };
+    for &pt in screen_points {
+        painter.circle_filled(pt, dot_radius, color);
+        if selected {
+            painter.circle_stroke(pt, dot_radius + 1.0, Stroke::new(1.0_f32, Color32::WHITE));
+        }
+    }
+
+    // Tag at top-left of bounding rect
+    let text = if label.trim().is_empty() {
+        "UNLABELED"
+    } else {
+        label
+    };
+
+    let galley = painter.layout_no_wrap(text.to_uppercase(), FontId::monospace(10.0), Color32::WHITE);
+    let extra_lock_w = if locked { 14.0 } else { 0.0 };
+    let tag_size = galley.size() + Vec2::new(10.0 + extra_lock_w, 6.0);
+    let tag_rect = Rect::from_min_size(Pos2::new(bounding_rect.left(), bounding_rect.top() - tag_size.y), tag_size);
+    let tag_rect = if tag_rect.top() < painter.clip_rect().top() {
+        Rect::from_min_size(bounding_rect.min, tag_size)
+    } else {
+        tag_rect
+    };
+
+    painter.rect_filled(tag_rect, 0.0, color);
+    if locked {
+        let icon_center = Pos2::new(tag_rect.left() + 8.0, tag_rect.center().y);
+        draw_lucide_lock(painter, icon_center, 9.0, true, Color32::WHITE, 1.2);
+        painter.galley(
+            Pos2::new(tag_rect.left() + 15.0, tag_rect.center().y - galley.size().y * 0.5),
+            galley,
+            Color32::WHITE,
+        );
+    } else {
+        painter.galley(
+            tag_rect.center() - galley.size() * 0.5,
+            galley,
+            Color32::WHITE,
+        );
+    }
+}
+
+pub fn draw_draft_polygon(
+    painter: &egui::Painter,
+    screen_points: &[Pos2],
+    current_cursor: Option<Pos2>,
+    color: Color32,
+    label: &str,
+    can_close: bool,
+) {
+    if screen_points.is_empty() {
+        return;
+    }
+
+    // Semi-transparent polygon fill preview if hovering near start point to close
+    if can_close && screen_points.len() >= 3 {
+        let fill_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 35);
+        painter.add(egui::Shape::convex_polygon(
+            screen_points.to_vec(),
+            fill_color,
+            Stroke::NONE,
+        ));
+    }
+
+    // Connect placed points
+    for w in screen_points.windows(2) {
+        painter.line_segment([w[0], w[1]], Stroke::new(1.8_f32, color));
+    }
+
+    // Connect last point to cursor or start point
+    if let Some(cursor) = current_cursor {
+        let last = *screen_points.last().unwrap();
+        if can_close {
+            // When hovering close to start point, connect directly back to start point
+            painter.line_segment([last, screen_points[0]], Stroke::new(2.0_f32, color));
+        } else {
+            painter.line_segment([last, cursor], Stroke::new(1.5_f32, color));
+
+            if screen_points.len() >= 2 {
+                painter.line_segment(
+                    [cursor, screen_points[0]],
+                    Stroke::new(1.0_f32, Color32::from_gray(130)),
+                );
+            }
+        }
+
+        // If hovering near start point, draw Photoshop-style loop indicator circle next to cursor
+        if can_close {
+            let loop_center = cursor + Vec2::new(10.0, 10.0);
+            painter.circle_filled(loop_center, 4.0, Color32::from_black_alpha(200));
+            painter.circle_stroke(loop_center, 3.5, Stroke::new(1.5_f32, Color32::WHITE));
+        }
+    }
+
+    // Draw vertex points
+    for (i, &pt) in screen_points.iter().enumerate() {
+        if i == 0 {
+            if can_close {
+                // Large glowing snap indicator for start point
+                painter.circle_filled(
+                    pt,
+                    9.0_f32,
+                    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 90),
+                );
+                painter.circle_filled(pt, 5.5_f32, color);
+                painter.circle_stroke(pt, 7.5_f32, Stroke::new(2.0_f32, Color32::WHITE));
+            } else {
+                painter.circle_filled(pt, 4.5_f32, color);
+                painter.circle_stroke(pt, 6.0_f32, Stroke::new(1.5_f32, Color32::WHITE));
+            }
+        } else {
+            painter.circle_filled(pt, 3.5_f32, color);
+            painter.circle_stroke(pt, 4.5_f32, Stroke::new(1.0_f32, Color32::WHITE));
+        }
+    }
+
+    // Render draft label tag near first point
+    let tag_pos = screen_points[0] - Vec2::new(0.0, 20.0);
+    let galley = painter.layout_no_wrap(label.to_uppercase(), FontId::monospace(9.5), Color32::WHITE);
+    let tag_rect = Rect::from_min_size(tag_pos, galley.size() + Vec2::new(8.0, 4.0));
+    painter.rect_filled(tag_rect, 0.0, color);
+    painter.galley(tag_rect.center() - galley.size() * 0.5, galley, Color32::WHITE);
+}
