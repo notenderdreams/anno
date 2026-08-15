@@ -26,9 +26,11 @@ pub enum ResizeHandle {
     BottomRight,
 }
 
+pub type InitialMovePosition = (u32, f32, f32, Option<Vec<[f32; 2]>>);
+
 pub enum ActiveDrag {
     Move {
-        initial_positions: Vec<(u32, f32, f32, Option<Vec<[f32; 2]>>)>,
+        initial_positions: Vec<InitialMovePosition>,
         start_pointer: Pos2,
     },
     Resize {
@@ -99,7 +101,7 @@ impl ClassPreset {
 pub fn default_presets() -> Vec<ClassPreset> {
     vec![
         ClassPreset::new("object", [255, 0, 0]),      // 1: Red
-        ClassPreset::new("person", [41, 121, 255]),    // 2: Blue
+        ClassPreset::new("person", [41, 121, 255]),   // 2: Blue
         ClassPreset::new("vehicle", [0, 230, 118]),   // 3: Green
         ClassPreset::new("animal", [255, 214, 0]),    // 4: Yellow
         ClassPreset::new("item", [255, 145, 0]),      // 5: Orange
@@ -434,9 +436,11 @@ mod tests {
         assert_eq!(json[0]["children"][0]["children"][0]["id"], 3);
         assert!(json[0].get("parent_id").is_none());
         assert!(json[0]["children"][0].get("parent_id").is_none());
-        assert!(json[0]["children"][0]["children"][0]
-            .get("children")
-            .is_none());
+        assert!(
+            json[0]["children"][0]["children"][0]
+                .get("children")
+                .is_none()
+        );
     }
 
     #[test]
@@ -488,17 +492,26 @@ mod tests {
         let mut annotations = Vec::new();
 
         // 1st person
-        assert_eq!(next_category_label("person", &annotations, None), "person_01");
+        assert_eq!(
+            next_category_label("person", &annotations, None),
+            "person_01"
+        );
 
         let mut a1 = annotation(1, None);
         a1.label = "person_01".to_string();
         annotations.push(a1);
 
         // 2nd person
-        assert_eq!(next_category_label("person", &annotations, None), "person_02");
+        assert_eq!(
+            next_category_label("person", &annotations, None),
+            "person_02"
+        );
 
         // 1st vehicle (independent count from person)
-        assert_eq!(next_category_label("vehicle", &annotations, None), "vehicle_01");
+        assert_eq!(
+            next_category_label("vehicle", &annotations, None),
+            "vehicle_01"
+        );
 
         let mut a2 = annotation(2, None);
         a2.label = "vehicle_01".to_string();
@@ -509,10 +522,16 @@ mod tests {
         a3.label = "person_02".to_string();
         annotations.push(a3);
 
-        assert_eq!(next_category_label("person", &annotations, None), "person_03");
+        assert_eq!(
+            next_category_label("person", &annotations, None),
+            "person_03"
+        );
 
         // Changing a2 (id: 2) from vehicle_01 to person: next person should be person_03
-        assert_eq!(next_category_label("person", &annotations, Some(2)), "person_03");
+        assert_eq!(
+            next_category_label("person", &annotations, Some(2)),
+            "person_03"
+        );
     }
 
     #[test]

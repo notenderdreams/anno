@@ -48,6 +48,7 @@ Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` /
 - `Cmd/Ctrl+S` — save a single-image `.anno` project or multi-image `.annobatch`
 - `Cmd/Ctrl+E` — export current image JSON
 - `Cmd/Ctrl+Shift+E` — export unified dataset JSON
+- `Cmd/Ctrl+Shift+C` — **Crop & Export selected region(s)** (PNG/JPEG with alpha transparency mask for polygons)
 - `Cmd/Ctrl+Z` — undo
 - `Cmd/Ctrl+Shift+Z` / `Cmd/Ctrl+Y` — redo
 - `Cmd/Ctrl+L` — lock or unlock selected layer/region(s)

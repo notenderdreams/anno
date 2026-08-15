@@ -1,6 +1,6 @@
-use std::collections::HashSet;
-use serde::{Deserialize, Serialize};
 use crate::models::Annotation;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 const DEFAULT_CAPACITY: usize = 100;
 
@@ -41,10 +41,10 @@ impl History {
     /// Record a direct snapshot before a discrete mutation (e.g. deletion, color preset change).
     pub fn record(&mut self, snapshot: AppSnapshot) {
         self.pending_edit = None;
-        if let Some(top) = self.undo_stack.last() {
-            if top == &snapshot {
-                return;
-            }
+        if let Some(top) = self.undo_stack.last()
+            && top == &snapshot
+        {
+            return;
         }
         self.undo_stack.push(snapshot);
         if self.undo_stack.len() > self.max_capacity {
@@ -64,20 +64,20 @@ impl History {
     /// Complete an interactive edit. If the current state changed compared to when
     /// `begin_edit` was called, the baseline snapshot is committed to the undo stack.
     pub fn commit_edit(&mut self, current: &AppSnapshot) {
-        if let Some(before) = self.pending_edit.take() {
-            if &before != current {
-                if let Some(top) = self.undo_stack.last() {
-                    if top == &before {
-                        self.redo_stack.clear();
-                        return;
-                    }
-                }
-                self.undo_stack.push(before);
-                if self.undo_stack.len() > self.max_capacity {
-                    self.undo_stack.remove(0);
-                }
+        if let Some(before) = self.pending_edit.take()
+            && &before != current
+        {
+            if let Some(top) = self.undo_stack.last()
+                && top == &before
+            {
                 self.redo_stack.clear();
+                return;
             }
+            self.undo_stack.push(before);
+            if self.undo_stack.len() > self.max_capacity {
+                self.undo_stack.remove(0);
+            }
+            self.redo_stack.clear();
         }
     }
 
@@ -88,10 +88,10 @@ impl History {
     /// Perform undo. If an uncommitted pending edit was active, commits the baseline
     /// then restores the previous state.
     pub fn undo(&mut self, current: AppSnapshot) -> Option<AppSnapshot> {
-        if let Some(before) = self.pending_edit.take() {
-            if before != current {
-                self.undo_stack.push(before);
-            }
+        if let Some(before) = self.pending_edit.take()
+            && before != current
+        {
+            self.undo_stack.push(before);
         }
         let previous = self.undo_stack.pop()?;
         self.redo_stack.push(current);

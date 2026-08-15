@@ -1,9 +1,9 @@
+use crate::models::LoadedImage;
+use eframe::egui;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread;
-use eframe::egui;
-use crate::models::LoadedImage;
 
 pub struct BackgroundLoader {
     thumb_request_tx: Sender<PathBuf>,

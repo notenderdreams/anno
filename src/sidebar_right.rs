@@ -1,9 +1,13 @@
-use eframe::egui::{self, Color32, FontFamily, FontId, Margin, Pos2, RichText, Sense, Stroke, Vec2};
 use crate::app::AnnotatorApp;
 use crate::geometry::update_hierarchy;
-use crate::models::{assign_preset_to_annotations, match_class_presets, next_category_label_from_labels};
+use crate::models::{
+    assign_preset_to_annotations, match_class_presets, next_category_label_from_labels,
+};
 use crate::render::draw_lucide_lock;
 use crate::theme::{MUTED, PANEL, RED};
+use eframe::egui::{
+    self, Color32, FontFamily, FontId, Margin, Pos2, RichText, Sense, Stroke, Vec2,
+};
 
 pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
     let mut export_requested = false;
@@ -33,8 +37,13 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 let selected_id = *app.selected.iter().next().unwrap();
                 let mut should_delete = false;
                 let mut should_convert_to_poly = false;
+                let mut should_crop_export = false;
                 let mut bounds_changed = false;
-                let other_labels: Vec<(u32, String)> = app.annotations.iter().map(|a| (a.id, a.label.clone())).collect();
+                let other_labels: Vec<(u32, String)> = app
+                    .annotations
+                    .iter()
+                    .map(|a| (a.id, a.label.clone()))
+                    .collect();
 
                 if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == selected_id) {
                     ui.horizontal(|ui| {
@@ -58,8 +67,19 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                         .monospace()
                                         .color(lock_color),
                                 )
-                                .fill(if annotation.locked { Color32::from_rgb(60, 45, 10) } else { Color32::from_gray(30) })
-                                .stroke(Stroke::new(1.0_f32, if annotation.locked { Color32::from_rgb(255, 179, 0) } else { Color32::from_gray(60) })),
+                                .fill(if annotation.locked {
+                                    Color32::from_rgb(60, 45, 10)
+                                } else {
+                                    Color32::from_gray(30)
+                                })
+                                .stroke(Stroke::new(
+                                    1.0_f32,
+                                    if annotation.locked {
+                                        Color32::from_rgb(255, 179, 0)
+                                    } else {
+                                        Color32::from_gray(60)
+                                    },
+                                )),
                             );
                             if lock_resp.clicked() {
                                 annotation.locked = !annotation.locked;
@@ -80,13 +100,19 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                         let is_selected = annotation.color == preset.color;
                                         let item_resp = ui.selectable_label(
                                             is_selected,
-                                            RichText::new(text).size(9.5).monospace().color(preset.color32()),
+                                            RichText::new(text)
+                                                .size(9.5)
+                                                .monospace()
+                                                .color(preset.color32()),
                                         );
                                         if item_resp.clicked() {
                                             annotation.color = preset.color;
                                             annotation.label = next_category_label_from_labels(
                                                 &preset.prefix,
-                                                other_labels.iter().filter(|(id, _)| *id != annotation.id).map(|(_, l)| l.as_str()),
+                                                other_labels
+                                                    .iter()
+                                                    .filter(|(id, _)| *id != annotation.id)
+                                                    .map(|(_, l)| l.as_str()),
                                             );
                                             edit_committed = true;
                                         }
@@ -113,7 +139,8 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     }
 
                     let suggestions = match_class_presets(&annotation.label, &app.presets);
-                    let show_autocomplete = (response.has_focus() || response.lost_focus()) && !suggestions.is_empty();
+                    let show_autocomplete =
+                        (response.has_focus() || response.lost_focus()) && !suggestions.is_empty();
 
                     if show_autocomplete {
                         let max_count = suggestions.len().min(4);
@@ -125,7 +152,13 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             });
                         } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
                             app.autocomplete_nav = Some(match app.autocomplete_nav {
-                                Some(curr) => if curr == 0 { max_count - 1 } else { curr - 1 },
+                                Some(curr) => {
+                                    if curr == 0 {
+                                        max_count - 1
+                                    } else {
+                                        curr - 1
+                                    }
+                                }
                                 None => max_count - 1,
                             });
                         }
@@ -139,7 +172,10 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     annotation.color = preset.color;
                                     annotation.label = next_category_label_from_labels(
                                         &preset.prefix,
-                                        other_labels.iter().filter(|(id, _)| *id != annotation.id).map(|(_, l)| l.as_str()),
+                                        other_labels
+                                            .iter()
+                                            .filter(|(id, _)| *id != annotation.id)
+                                            .map(|(_, l)| l.as_str()),
                                     );
                                     edit_committed = true;
                                     app.autocomplete_nav = None;
@@ -149,7 +185,10 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     annotation.color = preset.color;
                                     annotation.label = next_category_label_from_labels(
                                         &preset.prefix,
-                                        other_labels.iter().filter(|(id, _)| *id != annotation.id).map(|(_, l)| l.as_str()),
+                                        other_labels
+                                            .iter()
+                                            .filter(|(id, _)| *id != annotation.id)
+                                            .map(|(_, l)| l.as_str()),
                                     );
                                     edit_committed = true;
                                     app.autocomplete_nav = None;
@@ -171,26 +210,52 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                 ui.spacing_mut().item_spacing.y = 2.0;
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new("AUTOCOMPLETE").size(8.0).color(MUTED));
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        ui.label(RichText::new("↑↓ ↵/Tab").size(8.0).color(Color32::from_gray(100)));
-                                    });
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new("↑↓ ↵/Tab")
+                                                    .size(8.0)
+                                                    .color(Color32::from_gray(100)),
+                                            );
+                                        },
+                                    );
                                 });
                                 for (i, (idx, preset)) in suggestions.iter().take(4).enumerate() {
                                     let is_highlighted = app.autocomplete_nav == Some(i);
                                     let suggested_tag = next_category_label_from_labels(
                                         &preset.prefix,
-                                        other_labels.iter().filter(|(id, _)| *id != annotation.id).map(|(_, l)| l.as_str()),
+                                        other_labels
+                                            .iter()
+                                            .filter(|(id, _)| *id != annotation.id)
+                                            .map(|(_, l)| l.as_str()),
                                     );
                                     let arrow_prefix = if is_highlighted { "▶ " } else { "  " };
-                                    let btn_text = format!("{}[{}] {} → {}", arrow_prefix, idx + 1, preset.prefix, suggested_tag);
+                                    let btn_text = format!(
+                                        "{}[{}] {} → {}",
+                                        arrow_prefix,
+                                        idx + 1,
+                                        preset.prefix,
+                                        suggested_tag
+                                    );
                                     let btn = egui::Button::new(
-                                        RichText::new(btn_text)
-                                            .size(9.5)
-                                            .monospace()
-                                            .color(if is_highlighted { Color32::WHITE } else { Color32::from_gray(200) }),
+                                        RichText::new(btn_text).size(9.5).monospace().color(
+                                            if is_highlighted {
+                                                Color32::WHITE
+                                            } else {
+                                                Color32::from_gray(200)
+                                            },
+                                        ),
                                     )
-                                    .fill(if is_highlighted { Color32::from_gray(45) } else { Color32::from_gray(30) })
-                                    .stroke(Stroke::new(if is_highlighted { 1.5_f32 } else { 1.0_f32 }, preset.color32()));
+                                    .fill(if is_highlighted {
+                                        Color32::from_gray(45)
+                                    } else {
+                                        Color32::from_gray(30)
+                                    })
+                                    .stroke(Stroke::new(
+                                        if is_highlighted { 1.5_f32 } else { 1.0_f32 },
+                                        preset.color32(),
+                                    ));
                                     let resp = ui.add_sized([ui.available_width(), 20.0], btn);
                                     if resp.hovered() {
                                         app.autocomplete_nav = Some(i);
@@ -243,12 +308,12 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                     ui.horizontal(|ui| {
                         let presets: [[u8; 3]; 6] = [
-                            [255, 0, 0],   // Red
-                            [0, 230, 118], // Green
+                            [255, 0, 0],    // Red
+                            [0, 230, 118],  // Green
                             [41, 121, 255], // Blue
-                            [255, 214, 0], // Yellow
-                            [255, 145, 0], // Orange
-                            [0, 229, 255], // Cyan
+                            [255, 214, 0],  // Yellow
+                            [255, 145, 0],  // Orange
+                            [0, 229, 255],  // Cyan
                         ];
 
                         for rgb in presets {
@@ -328,14 +393,17 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("BOUNDS (PX)").size(9.0).color(MUTED));
                         if let Some(pts) = &annotation.points {
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(
-                                    RichText::new(format!("POLYGON ({} PTS)", pts.len()))
-                                        .size(8.5)
-                                        .monospace()
-                                        .color(Color32::from_rgb(100, 180, 255)),
-                                );
-                            });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        RichText::new(format!("POLYGON ({} PTS)", pts.len()))
+                                            .size(8.5)
+                                            .monospace()
+                                            .color(Color32::from_rgb(100, 180, 255)),
+                                    );
+                                },
+                            );
                         }
                     });
                     ui.add_space(4.0);
@@ -351,11 +419,15 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             .num_columns(2)
                             .spacing([12.0, 6.0])
                             .show(ui, |ui| {
-                                let (x_ch, x_start, x_stop) = bound_field(ui, "X", &mut annotation.x, 0.0, max_x);
-                                let (y_ch, y_start, y_stop) = bound_field(ui, "Y", &mut annotation.y, 0.0, max_y);
+                                let (x_ch, x_start, x_stop) =
+                                    bound_field(ui, "X", &mut annotation.x, 0.0, max_x);
+                                let (y_ch, y_start, y_stop) =
+                                    bound_field(ui, "Y", &mut annotation.y, 0.0, max_y);
                                 ui.end_row();
-                                let (w_ch, w_start, w_stop) = bound_field(ui, "W", &mut annotation.width, 8.0, max_w);
-                                let (h_ch, h_start, h_stop) = bound_field(ui, "H", &mut annotation.height, 8.0, max_h);
+                                let (w_ch, w_start, w_stop) =
+                                    bound_field(ui, "W", &mut annotation.width, 8.0, max_w);
+                                let (h_ch, h_start, h_stop) =
+                                    bound_field(ui, "H", &mut annotation.height, 8.0, max_h);
                                 ui.end_row();
 
                                 if x_ch || y_ch || w_ch || h_ch {
@@ -395,11 +467,33 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     }
 
                     ui.add_space(8.0);
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 26.0],
+                            egui::Button::new(
+                                RichText::new("CROP & EXPORT IMAGE")
+                                    .size(9.0)
+                                    .monospace()
+                                    .strong()
+                                    .color(Color32::from_rgb(160, 240, 180)),
+                            )
+                            .fill(Color32::from_rgb(18, 42, 28))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(40, 130, 70)))
+                            .rounding(2.0),
+                        )
+                        .clicked()
+                    {
+                        should_crop_export = true;
+                    }
+
+                    ui.add_space(8.0);
                     ui.add_enabled_ui(!is_locked, |ui| {
                         if ui
                             .add_sized(
                                 [ui.available_width(), 28.0],
-                                egui::Button::new(RichText::new("DELETE REGION").size(10.0).color(RED)),
+                                egui::Button::new(
+                                    RichText::new("DELETE REGION").size(10.0).color(RED),
+                                ),
                             )
                             .clicked()
                         {
@@ -412,13 +506,19 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     app.convert_selected_to_polygon();
                 }
 
+                if should_crop_export {
+                    app.crop_and_export_selected();
+                }
+
                 if bounds_changed {
                     update_hierarchy(&mut app.annotations);
                 }
 
                 if let Some(color) = picked_color {
                     app.history.record(app.current_snapshot());
-                    if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == selected_id) {
+                    if let Some(annotation) =
+                        app.annotations.iter_mut().find(|a| a.id == selected_id)
+                    {
                         annotation.color = color;
                     }
                 }
@@ -436,6 +536,7 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 }
             } else if app.selected.len() > 1 {
                 let mut should_delete = false;
+                let mut should_crop_export = false;
                 let count = app.selected.len();
 
                 ui.horizontal(|ui| {
@@ -457,13 +558,30 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             ("LOCK ALL", Color32::from_rgb(255, 179, 0))
                         };
                         let btn_size = Vec2::new(84.0, 20.0);
-                        let (btn_rect, btn_response) = ui.allocate_exact_size(btn_size, Sense::click());
+                        let (btn_rect, btn_response) =
+                            ui.allocate_exact_size(btn_size, Sense::click());
                         if ui.is_rect_visible(btn_rect) {
-                            let bg = if btn_response.hovered() { Color32::from_gray(32) } else { Color32::from_gray(22) };
+                            let bg = if btn_response.hovered() {
+                                Color32::from_gray(32)
+                            } else {
+                                Color32::from_gray(22)
+                            };
                             ui.painter().rect_filled(btn_rect, 2.0, bg);
-                            ui.painter().rect_stroke(btn_rect, 2.0, Stroke::new(1.0_f32, Color32::from_gray(50)));
-                            let icon_center = Pos2::new(btn_rect.left() + 11.0, btn_rect.center().y);
-                            draw_lucide_lock(ui.painter(), icon_center, 10.0, !all_locked, lock_color, 1.2);
+                            ui.painter().rect_stroke(
+                                btn_rect,
+                                2.0,
+                                Stroke::new(1.0_f32, Color32::from_gray(50)),
+                            );
+                            let icon_center =
+                                Pos2::new(btn_rect.left() + 11.0, btn_rect.center().y);
+                            draw_lucide_lock(
+                                ui.painter(),
+                                icon_center,
+                                10.0,
+                                !all_locked,
+                                lock_color,
+                                1.2,
+                            );
                             ui.painter().text(
                                 Pos2::new(btn_rect.left() + 20.0, btn_rect.center().y),
                                 egui::Align2::LEFT_CENTER,
@@ -489,10 +607,17 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     let text = format!("[{}] {}", idx + 1, preset.prefix);
                                     let item_resp = ui.selectable_label(
                                         false,
-                                        RichText::new(text).size(9.5).monospace().color(preset.color32()),
+                                        RichText::new(text)
+                                            .size(9.5)
+                                            .monospace()
+                                            .color(preset.color32()),
                                     );
                                     if item_resp.clicked() {
-                                        assign_preset_to_annotations(&mut app.annotations, &app.selected, preset);
+                                        assign_preset_to_annotations(
+                                            &mut app.annotations,
+                                            &app.selected,
+                                            preset,
+                                        );
                                         edit_committed = true;
                                     }
                                 }
@@ -502,7 +627,11 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                 let first_id = *app.selected.iter().next().unwrap();
                 let all_same_label = {
-                    let first_label = app.annotations.iter().find(|a| a.id == first_id).map(|a| &a.label);
+                    let first_label = app
+                        .annotations
+                        .iter()
+                        .find(|a| a.id == first_id)
+                        .map(|a| &a.label);
                     app.annotations
                         .iter()
                         .filter(|a| app.selected.contains(&a.id))
@@ -532,7 +661,8 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 }
 
                 let batch_suggestions = match_class_presets(&batch_label, &app.presets);
-                let show_batch_autocomplete = (response.has_focus() || response.lost_focus()) && !batch_suggestions.is_empty();
+                let show_batch_autocomplete = (response.has_focus() || response.lost_focus())
+                    && !batch_suggestions.is_empty();
 
                 if show_batch_autocomplete {
                     let max_count = batch_suggestions.len().min(4);
@@ -544,7 +674,13 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         });
                     } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
                         app.autocomplete_nav = Some(match app.autocomplete_nav {
-                            Some(curr) => if curr == 0 { max_count - 1 } else { curr - 1 },
+                            Some(curr) => {
+                                if curr == 0 {
+                                    max_count - 1
+                                } else {
+                                    curr - 1
+                                }
+                            }
                             None => max_count - 1,
                         });
                     }
@@ -555,13 +691,21 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     if enter_pressed || tab_pressed {
                         if let Some(selected_idx) = app.autocomplete_nav {
                             if let Some((_, preset)) = batch_suggestions.get(selected_idx) {
-                                assign_preset_to_annotations(&mut app.annotations, &app.selected, preset);
+                                assign_preset_to_annotations(
+                                    &mut app.annotations,
+                                    &app.selected,
+                                    preset,
+                                );
                                 edit_committed = true;
                                 app.autocomplete_nav = None;
                             }
                         } else if tab_pressed {
                             if let Some((_, preset)) = batch_suggestions.first() {
-                                assign_preset_to_annotations(&mut app.annotations, &app.selected, preset);
+                                assign_preset_to_annotations(
+                                    &mut app.annotations,
+                                    &app.selected,
+                                    preset,
+                                );
                                 edit_committed = true;
                                 app.autocomplete_nav = None;
                             }
@@ -582,28 +726,54 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             ui.spacing_mut().item_spacing.y = 2.0;
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new("AUTOCOMPLETE").size(8.0).color(MUTED));
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.label(RichText::new("↑↓ ↵/Tab").size(8.0).color(Color32::from_gray(100)));
-                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new("↑↓ ↵/Tab")
+                                                .size(8.0)
+                                                .color(Color32::from_gray(100)),
+                                        );
+                                    },
+                                );
                             });
                             for (i, (idx, preset)) in batch_suggestions.iter().take(4).enumerate() {
                                 let is_highlighted = app.autocomplete_nav == Some(i);
                                 let arrow_prefix = if is_highlighted { "▶ " } else { "  " };
-                                let btn_text = format!("{}[{}] {} (APPLY TO ALL)", arrow_prefix, idx + 1, preset.prefix);
+                                let btn_text = format!(
+                                    "{}[{}] {} (APPLY TO ALL)",
+                                    arrow_prefix,
+                                    idx + 1,
+                                    preset.prefix
+                                );
                                 let btn = egui::Button::new(
-                                    RichText::new(btn_text)
-                                        .size(9.5)
-                                        .monospace()
-                                        .color(if is_highlighted { Color32::WHITE } else { Color32::from_gray(200) }),
+                                    RichText::new(btn_text).size(9.5).monospace().color(
+                                        if is_highlighted {
+                                            Color32::WHITE
+                                        } else {
+                                            Color32::from_gray(200)
+                                        },
+                                    ),
                                 )
-                                .fill(if is_highlighted { Color32::from_gray(45) } else { Color32::from_gray(30) })
-                                .stroke(Stroke::new(if is_highlighted { 1.5_f32 } else { 1.0_f32 }, preset.color32()));
+                                .fill(if is_highlighted {
+                                    Color32::from_gray(45)
+                                } else {
+                                    Color32::from_gray(30)
+                                })
+                                .stroke(Stroke::new(
+                                    if is_highlighted { 1.5_f32 } else { 1.0_f32 },
+                                    preset.color32(),
+                                ));
                                 let resp = ui.add_sized([ui.available_width(), 20.0], btn);
                                 if resp.hovered() {
                                     app.autocomplete_nav = Some(i);
                                 }
                                 if resp.clicked() {
-                                    assign_preset_to_annotations(&mut app.annotations, &app.selected, preset);
+                                    assign_preset_to_annotations(
+                                        &mut app.annotations,
+                                        &app.selected,
+                                        preset,
+                                    );
                                     edit_committed = true;
                                     app.autocomplete_nav = None;
                                 }
@@ -618,7 +788,11 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 }
 
                 ui.add_space(10.0);
-                ui.label(RichText::new("SET DESCRIPTION (ALL)").size(9.0).color(MUTED));
+                ui.label(
+                    RichText::new("SET DESCRIPTION (ALL)")
+                        .size(9.0)
+                        .color(MUTED),
+                );
                 ui.add_space(4.0);
 
                 let all_same_desc = {
@@ -659,7 +833,11 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     } else {
                         Some(batch_desc.clone())
                     };
-                    for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id)) {
+                    for a in app
+                        .annotations
+                        .iter_mut()
+                        .filter(|a| app.selected.contains(&a.id))
+                    {
                         a.description = new_desc.clone();
                     }
                 }
@@ -673,12 +851,12 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                 ui.horizontal(|ui| {
                     let presets: [[u8; 3]; 6] = [
-                        [255, 0, 0],   // Red
-                        [0, 230, 118], // Green
+                        [255, 0, 0],    // Red
+                        [0, 230, 118],  // Green
                         [41, 121, 255], // Blue
-                        [255, 214, 0], // Yellow
-                        [255, 145, 0], // Orange
-                        [0, 229, 255], // Cyan
+                        [255, 214, 0],  // Yellow
+                        [255, 145, 0],  // Orange
+                        [0, 229, 255],  // Cyan
                     ];
 
                     for rgb in presets {
@@ -745,7 +923,6 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     );
                 });
 
-
                 let num_rects = app
                     .annotations
                     .iter()
@@ -775,11 +952,35 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     }
                 }
 
+                ui.add_space(8.0);
+                if ui
+                    .add_sized(
+                        [ui.available_width(), 26.0],
+                        egui::Button::new(
+                            RichText::new(format!("CROP & EXPORT {count} REGIONS"))
+                                .size(9.0)
+                                .monospace()
+                                .strong()
+                                .color(Color32::from_rgb(160, 240, 180)),
+                        )
+                        .fill(Color32::from_rgb(18, 42, 28))
+                        .stroke(Stroke::new(1.0_f32, Color32::from_rgb(40, 130, 70)))
+                        .rounding(2.0),
+                    )
+                    .clicked()
+                {
+                    should_crop_export = true;
+                }
+
                 ui.add_space(10.0);
                 if ui
                     .add_sized(
                         [ui.available_width(), 30.0],
-                        egui::Button::new(RichText::new(format!("DELETE {count} REGIONS")).size(10.0).color(RED)),
+                        egui::Button::new(
+                            RichText::new(format!("DELETE {count} REGIONS"))
+                                .size(10.0)
+                                .color(RED),
+                        ),
                     )
                     .clicked()
                 {
@@ -801,9 +1002,17 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     app.convert_selected_to_polygon();
                 }
 
+                if should_crop_export {
+                    app.crop_and_export_selected();
+                }
+
                 if let Some(color) = picked_color {
                     app.history.record(app.current_snapshot());
-                    for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id)) {
+                    for a in app
+                        .annotations
+                        .iter_mut()
+                        .filter(|a| app.selected.contains(&a.id))
+                    {
                         a.color = color;
                     }
                 }
@@ -933,7 +1142,11 @@ fn bound_field(
         if label_response.dragged() {
             let delta = ui.input(|i| i.pointer.delta().x);
             if delta != 0.0 {
-                let speed = if ui.input(|i| i.modifiers.shift) { 0.1 } else { 1.0 };
+                let speed = if ui.input(|i| i.modifiers.shift) {
+                    0.1
+                } else {
+                    1.0
+                };
                 *val = (*val + delta * speed).clamp(min, max).round();
                 changed = true;
             }
@@ -943,9 +1156,7 @@ fn bound_field(
             stopped = true;
         }
 
-        let drag_val = egui::DragValue::new(val)
-            .speed(1.0)
-            .range(min..=max);
+        let drag_val = egui::DragValue::new(val).speed(1.0).range(min..=max);
 
         let drag_response = ui.add(drag_val);
 

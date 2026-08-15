@@ -35,7 +35,10 @@ pub fn annotation_tag_rect(annotation: &Annotation, image_rect: Rect, image_size
     let extra = if annotation.locked { 18.0 } else { 0.0 };
     let width = (label.len() as f32 * 6.5 + 10.0 + extra).max(35.0);
     let height = 16.0;
-    let tag_rect = Rect::from_min_size(Pos2::new(rect.left(), rect.top() - height), Vec2::new(width, height));
+    let tag_rect = Rect::from_min_size(
+        Pos2::new(rect.left(), rect.top() - height),
+        Vec2::new(width, height),
+    );
     if tag_rect.top() < image_rect.top() {
         Rect::from_min_size(rect.min, Vec2::new(width, height))
     } else {
@@ -111,7 +114,12 @@ pub fn polygon_bounding_box(points: &[Pos2]) -> (f32, f32, f32, f32) {
         max_x = max_x.max(p.x);
         max_y = max_y.max(p.y);
     }
-    (min_x, min_y, (max_x - min_x).max(1.0), (max_y - min_y).max(1.0))
+    (
+        min_x,
+        min_y,
+        (max_x - min_x).max(1.0),
+        (max_y - min_y).max(1.0),
+    )
 }
 
 pub fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
@@ -170,8 +178,16 @@ pub fn hit_polygon_edge_with_projection(
     let n = points.len();
     for i in 0..n {
         let j = (i + 1) % n;
-        let p1 = image_to_screen(Pos2::new(points[i][0], points[i][1]), image_rect, image_size);
-        let p2 = image_to_screen(Pos2::new(points[j][0], points[j][1]), image_rect, image_size);
+        let p1 = image_to_screen(
+            Pos2::new(points[i][0], points[i][1]),
+            image_rect,
+            image_size,
+        );
+        let p2 = image_to_screen(
+            Pos2::new(points[j][0], points[j][1]),
+            image_rect,
+            image_size,
+        );
         let d = distance_to_segment(pointer, p1, p2);
         if d <= best_dist {
             best_dist = d;
@@ -189,7 +205,8 @@ pub fn hit_polygon_edge(
     pointer: Pos2,
     threshold: f32,
 ) -> Option<usize> {
-    hit_polygon_edge_with_projection(points, image_rect, image_size, pointer, threshold).map(|(idx, _)| idx)
+    hit_polygon_edge_with_projection(points, image_rect, image_size, pointer, threshold)
+        .map(|(idx, _)| idx)
 }
 
 #[cfg(test)]
@@ -290,7 +307,13 @@ mod tests {
         let img_rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0));
         let img_size = Vec2::new(100.0, 100.0);
 
-        let hit = hit_polygon_edge_with_projection(&points, img_rect, img_size, Pos2::new(50.0, 3.0), 8.0);
+        let hit = hit_polygon_edge_with_projection(
+            &points,
+            img_rect,
+            img_size,
+            Pos2::new(50.0, 3.0),
+            8.0,
+        );
         assert!(hit.is_some());
         let (edge_idx, proj) = hit.unwrap();
         assert_eq!(edge_idx, 0);

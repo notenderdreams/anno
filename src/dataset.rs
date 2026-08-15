@@ -1,9 +1,7 @@
-use std::path::{Path, PathBuf};
 use crate::models::ProjectFile;
+use std::path::{Path, PathBuf};
 
-pub const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff",
-];
+pub const SUPPORTED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff"];
 
 pub fn is_image_file(path: &Path) -> bool {
     path.extension()

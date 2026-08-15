@@ -1,9 +1,9 @@
-use muda::{
-    accelerator::{Accelerator, Code, Modifiers},
-    Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu,
-};
 use crate::app::AnnotatorApp;
 use eframe::egui;
+use muda::{
+    Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu,
+    accelerator::{Accelerator, Code, Modifiers},
+};
 
 pub struct NativeMenuBar {
     pub menu: Menu,
@@ -13,6 +13,7 @@ pub struct NativeMenuBar {
     pub save_project: MenuItem,
     pub export_json: MenuItem,
     pub export_dataset_json: MenuItem,
+    pub crop_export: MenuItem,
     pub undo: MenuItem,
     pub redo: MenuItem,
     pub select_all: MenuItem,
@@ -96,6 +97,15 @@ impl NativeMenuBar {
                 Code::KeyE,
             )),
         );
+        let crop_export = MenuItem::with_id(
+            "crop_export",
+            "Crop & Export Selected...",
+            false,
+            Some(Accelerator::new(
+                Some(Modifiers::SUPER | Modifiers::SHIFT),
+                Code::KeyC,
+            )),
+        );
 
         let file_menu = Submenu::new("File", true);
         let _ = file_menu.append_items(&[
@@ -106,6 +116,8 @@ impl NativeMenuBar {
             &save_project,
             &export_json,
             &export_dataset_json,
+            &PredefinedMenuItem::separator(),
+            &crop_export,
         ]);
 
         // 3. Edit Menu
@@ -206,16 +218,11 @@ impl NativeMenuBar {
             &zoom_out,
         ]);
 
-        let _ = menu.append_items(&[
-            &app_menu,
-            &file_menu,
-            &edit_menu,
-            &view_menu,
-        ]);
+        let _ = menu.append_items(&[&app_menu, &file_menu, &edit_menu, &view_menu]);
 
         #[cfg(target_os = "macos")]
         {
-            let _ = menu.init_for_nsapp();
+            menu.init_for_nsapp();
         }
 
         Self {
@@ -226,6 +233,7 @@ impl NativeMenuBar {
             save_project,
             export_json,
             export_dataset_json,
+            crop_export,
             undo,
             redo,
             select_all,
@@ -240,6 +248,7 @@ impl NativeMenuBar {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update_states(
         &self,
         has_image: bool,
@@ -251,23 +260,24 @@ impl NativeMenuBar {
         can_prev: bool,
         can_next: bool,
     ) {
-        let _ = self.save_project.set_enabled(has_image);
-        let _ = self.export_json.set_enabled(has_image);
-        let _ = self.export_dataset_json.set_enabled(has_dataset);
-        let _ = self.reset_view.set_enabled(has_image);
-        let _ = self.zoom_in.set_enabled(has_image);
-        let _ = self.zoom_out.set_enabled(has_image);
+        self.save_project.set_enabled(has_image);
+        self.export_json.set_enabled(has_image);
+        self.export_dataset_json.set_enabled(has_dataset);
+        self.crop_export.set_enabled(has_image && has_selection);
+        self.reset_view.set_enabled(has_image);
+        self.zoom_in.set_enabled(has_image);
+        self.zoom_out.set_enabled(has_image);
 
-        let _ = self.prev_image.set_enabled(can_prev);
-        let _ = self.next_image.set_enabled(can_next);
+        self.prev_image.set_enabled(can_prev);
+        self.next_image.set_enabled(can_next);
 
-        let _ = self.undo.set_enabled(can_undo);
-        let _ = self.redo.set_enabled(can_redo);
+        self.undo.set_enabled(can_undo);
+        self.redo.set_enabled(can_redo);
 
-        let _ = self.select_all.set_enabled(has_annotations);
-        let _ = self.toggle_lock.set_enabled(has_selection);
-        let _ = self.delete_region.set_enabled(has_selection);
-        let _ = self.deselect.set_enabled(has_selection);
+        self.select_all.set_enabled(has_annotations);
+        self.toggle_lock.set_enabled(has_selection);
+        self.delete_region.set_enabled(has_selection);
+        self.deselect.set_enabled(has_selection);
     }
 }
 
@@ -298,6 +308,7 @@ pub fn handle_native_menu_events(app: &mut AnnotatorApp, ctx: &egui::Context) {
             "save_project" => app.save_project_dialog(),
             "export_json" => app.export_dialog(),
             "export_dataset_json" => app.export_unified_dataset_dialog(),
+            "crop_export" => app.crop_and_export_selected(),
             "undo" => app.undo(),
             "redo" => app.redo(),
             "select_all" => app.select_all(),

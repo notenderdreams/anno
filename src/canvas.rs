@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use eframe::egui::{
-    self, Align2, Color32, CursorIcon, FontId, Key, Margin, PointerButton, Pos2, Rect, RichText, Sense, Stroke, Vec2,
+    self, Align2, Color32, CursorIcon, FontId, Key, Margin, PointerButton, Pos2, Rect, RichText,
+    Sense, Stroke, Vec2,
 };
 
 use crate::app::AnnotatorApp;
@@ -10,8 +11,8 @@ use crate::geometry::{
     hit_polygon_vertex, image_to_screen, point_in_polygon, screen_to_image, update_hierarchy,
 };
 use crate::models::{
-    match_class_presets, next_category_label, next_category_label_from_labels, ActiveDrag,
-    Annotation, Draft, DraftPolygon, ResizeHandle, ToolMode,
+    ActiveDrag, Annotation, Draft, DraftPolygon, ResizeHandle, ToolMode, match_class_presets,
+    next_category_label, next_category_label_from_labels,
 };
 use crate::render::{draw_draft_polygon, draw_polygon_annotation, draw_surveillance_box};
 use crate::theme::{BG, MUTED, RED};
@@ -42,12 +43,12 @@ fn hit_resize_handle(rect: Rect, pointer: Pos2) -> Option<ResizeHandle> {
     }
 }
 
-pub fn hit_annotation<'a>(
-    annotations: &'a [Annotation],
+pub fn hit_annotation(
+    annotations: &[Annotation],
     image_rect: Rect,
     image_size: Vec2,
     pointer: Pos2,
-) -> Option<&'a Annotation> {
+) -> Option<&Annotation> {
     // 1. Tags have absolute highest priority so inner annotations can always be selected
     // even if their tag falls inside another annotation's bounding box.
     if let Some(hit) = annotations
@@ -141,8 +142,8 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
             // Keep the image point beneath the cursor fixed while zooming.
             if response.hovered() && !response.dragged() {
                 let scroll_y = ctx.input(|input| input.raw_scroll_delta.y);
-                if scroll_y != 0.0 {
-                    if let Some(pointer) = response.hover_pos() {
+                if scroll_y != 0.0
+                    && let Some(pointer) = response.hover_pos() {
                         let old_zoom = app.zoom;
                         let new_zoom = (old_zoom * (scroll_y * 0.02).exp())
                             .clamp(MIN_ZOOM, MAX_ZOOM);
@@ -153,7 +154,6 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         app.zoom = new_zoom;
                         app.pan = new_center - canvas.center();
                     }
-                }
             }
 
             let display_size = image_size * fit_scale * app.zoom;
@@ -215,9 +215,9 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
             if let Some(ActiveDrag::MoveVertex { id, vertex_idx, .. }) = &app.active_drag {
                 hovered_polygon_vertex = Some((*id, *vertex_idx));
                 ctx.set_cursor_icon(CursorIcon::Grabbing);
-            } else if !is_panning && !space_held {
-                if let Some(pointer) = response.hover_pos() {
-                    if minimap_rect.map_or(false, |r| r.contains(pointer)) {
+            } else if !is_panning && !space_held
+                && let Some(pointer) = response.hover_pos() {
+                    if minimap_rect.is_some_and(|r| r.contains(pointer)) {
                         ctx.set_cursor_icon(CursorIcon::PointingHand);
                     } else if image_rect.contains(pointer) {
                         if app.tool_mode == ToolMode::Polygon {
@@ -244,39 +244,35 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                             // 1. Check vertex handles on selected UNLOCKED polygon annotations (threshold: 12px)
                             for &selected_id in &app.selected {
-                                if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
-                                    if let Some(points) = &annotation.points {
-                                        if let Some(vertex_idx) = hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0) {
+                                if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked)
+                                    && let Some(points) = &annotation.points
+                                        && let Some(vertex_idx) = hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0) {
                                             hovered_polygon_vertex = Some((selected_id, vertex_idx));
                                             ctx.set_cursor_icon(CursorIcon::PointingHand);
                                             cursor_set = true;
                                             break;
                                         }
-                                    }
-                                }
                             }
 
                             // If not on selected polygon, check any unlocked polygon's vertices
                             if !cursor_set {
                                 for annotation in app.annotations.iter().rev() {
-                                    if !annotation.locked {
-                                        if let Some(points) = &annotation.points {
-                                            if let Some(vertex_idx) = hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0) {
+                                    if !annotation.locked
+                                        && let Some(points) = &annotation.points
+                                            && let Some(vertex_idx) = hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0) {
                                                 hovered_polygon_vertex = Some((annotation.id, vertex_idx));
                                                 ctx.set_cursor_icon(CursorIcon::PointingHand);
                                                 cursor_set = true;
                                                 break;
                                             }
-                                        }
-                                    }
                                 }
                             }
 
                             // 2. Check resize handles on selected annotations (boxes only)
                             if !cursor_set {
                                 for &selected_id in &app.selected {
-                                    if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
-                                        if annotation.points.is_none() {
+                                    if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked)
+                                        && annotation.points.is_none() {
                                             let rect = annotation_screen_rect(annotation, image_rect, image_size);
                                             if let Some(handle) = hit_resize_handle(rect, pointer) {
                                                 match handle {
@@ -291,23 +287,20 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                                 break;
                                             }
                                         }
-                                    }
                                 }
                             }
 
                             // 3. Check edge insert hover hint on selected unlocked polygon annotations
                             if !cursor_set {
                                 for &selected_id in &app.selected {
-                                    if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
-                                        if let Some(points) = &annotation.points {
-                                            if let Some((_edge_idx, proj)) = hit_polygon_edge_with_projection(points, image_rect, image_size, pointer, 10.0) {
+                                    if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked)
+                                        && let Some(points) = &annotation.points
+                                            && let Some((_edge_idx, proj)) = hit_polygon_edge_with_projection(points, image_rect, image_size, pointer, 10.0) {
                                                 hovered_edge_hint = Some((selected_id, proj));
                                                 ctx.set_cursor_icon(CursorIcon::Crosshair);
                                                 cursor_set = true;
                                                 break;
                                             }
-                                        }
-                                    }
                                 }
                             }
 
@@ -339,7 +332,6 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         }
                     }
                 }
-            }
 
             if response.secondary_clicked() {
                 if let Some(poly) = &mut app.draft_polygon {
@@ -350,26 +342,24 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     } else {
                         app.status = format!("PEN TOOL: POINT REMOVED ({} REMAINING)", poly.points.len());
                     }
-                } else if app.tool_mode == ToolMode::Select {
-                    if let Some(pointer) = response.interact_pointer_pos() {
-                        if image_rect.contains(pointer) {
+                } else if app.tool_mode == ToolMode::Select
+                    && let Some(pointer) = response.interact_pointer_pos()
+                        && image_rect.contains(pointer) {
                             let mut delete_target = None;
                             for &selected_id in &app.selected {
-                                if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
-                                    if let Some(points) = &annotation.points {
-                                        if let Some(vertex_idx) = hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0) {
+                                if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked)
+                                    && let Some(points) = &annotation.points
+                                        && let Some(vertex_idx) = hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0) {
                                             delete_target = Some((selected_id, vertex_idx, points.len()));
                                             break;
                                         }
-                                    }
-                                }
                             }
 
                             if let Some((id, vertex_idx, count)) = delete_target {
                                 if count > 3 {
                                     app.history.record(app.current_snapshot());
-                                    if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == id) {
-                                        if let Some(points) = &mut annotation.points {
+                                    if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == id)
+                                        && let Some(points) = &mut annotation.points {
                                             points.remove(vertex_idx);
                                             let poly_pos: Vec<Pos2> = points.iter().map(|p| Pos2::new(p[0], p[1])).collect();
                                             let (x, y, w, h) = crate::geometry::polygon_bounding_box(&poly_pos);
@@ -379,7 +369,6 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                             annotation.height = h.round();
                                             app.status = format!("POLYGON VERTEX REMOVED ({} REMAINING)", points.len());
                                         }
-                                    }
                                     app.selected_vertex = None;
                                     update_hierarchy(&mut app.annotations);
                                 } else {
@@ -387,35 +376,30 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                 }
                             }
                         }
-                    }
-                }
             }
 
             if response.double_clicked() {
-                if app.tool_mode == ToolMode::Polygon && app.draft_polygon.as_ref().map_or(false, |p| p.points.len() >= 3) {
+                if app.tool_mode == ToolMode::Polygon && app.draft_polygon.as_ref().is_some_and(|p| p.points.len() >= 3) {
                     app.finish_draft_polygon();
-                } else if app.tool_mode == ToolMode::Select {
-                    if let Some(pointer) = response.interact_pointer_pos() {
-                        if !minimap_rect.map_or(false, |r| r.contains(pointer)) && image_rect.contains(pointer) {
+                } else if app.tool_mode == ToolMode::Select
+                    && let Some(pointer) = response.interact_pointer_pos()
+                        && !minimap_rect.is_some_and(|r| r.contains(pointer)) && image_rect.contains(pointer) {
                             let mut insert_target = None;
                             for &selected_id in &app.selected {
-                                if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
-                                    if let Some(points) = &annotation.points {
-                                        if hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0).is_none() {
-                                            if let Some((edge_idx, proj)) = hit_polygon_edge_with_projection(points, image_rect, image_size, pointer, 10.0) {
+                                if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked)
+                                    && let Some(points) = &annotation.points
+                                        && hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0).is_none()
+                                            && let Some((edge_idx, proj)) = hit_polygon_edge_with_projection(points, image_rect, image_size, pointer, 10.0) {
                                                 insert_target = Some((selected_id, edge_idx, proj));
                                                 break;
                                             }
-                                        }
-                                    }
-                                }
                             }
 
                             if let Some((id, edge_idx, proj_pos)) = insert_target {
                                 app.history.record(app.current_snapshot());
                                 let img_pos = screen_to_image(proj_pos, image_rect, image_size);
-                                if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == id) {
-                                    if let Some(points) = &mut annotation.points {
+                                if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == id)
+                                    && let Some(points) = &mut annotation.points {
                                         let new_idx = edge_idx + 1;
                                         points.insert(new_idx, [img_pos.x.round(), img_pos.y.round()]);
                                         let poly_pos: Vec<Pos2> = points.iter().map(|p| Pos2::new(p[0], p[1])).collect();
@@ -427,7 +411,6 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                         app.status = format!("POLYGON VERTEX INSERTED ({} TOTAL)", points.len());
                                         app.selected_vertex = Some((id, new_idx));
                                     }
-                                }
                                 update_hierarchy(&mut app.annotations);
                             } else if let Some(hit) = hit_annotation(&app.annotations, image_rect, image_size, pointer) {
                                 let hit_id = hit.id;
@@ -437,11 +420,9 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                 app.request_label_focus = true;
                             }
                         }
-                    }
-                }
-            } else if response.drag_started_by(PointerButton::Primary) && !space_held {
-                if let Some(pointer) = response.interact_pointer_pos() {
-                    if minimap_rect.map_or(false, |r| r.contains(pointer)) {
+            } else if response.drag_started_by(PointerButton::Primary) && !space_held
+                && let Some(pointer) = response.interact_pointer_pos() {
+                    if minimap_rect.is_some_and(|r| r.contains(pointer)) {
                         if let Some(m_img_rect) = minimap_img_rect {
                             app.pan = pan_from_minimap_click(pointer, m_img_rect, display_size, canvas.size());
                             app.active_drag = Some(ActiveDrag::MinimapPan {
@@ -456,21 +437,19 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             // 1. Check vertex handles on selected UNLOCKED polygon annotations (or any unlocked polygon if clicking on vertex)
                             let mut vertex_drag = None;
                             for &selected_id in &app.selected {
-                                if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
-                                    if let Some(points) = &annotation.points {
-                                        if let Some(vertex_idx) = hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0) {
+                                if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked)
+                                    && let Some(points) = &annotation.points
+                                        && let Some(vertex_idx) = hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0) {
                                             vertex_drag = Some((selected_id, vertex_idx, points[vertex_idx]));
                                             break;
                                         }
-                                    }
-                                }
                             }
 
                             if vertex_drag.is_none() {
                                 for annotation in app.annotations.iter().rev() {
-                                    if !annotation.locked {
-                                        if let Some(points) = &annotation.points {
-                                            if let Some(vertex_idx) = hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0) {
+                                    if !annotation.locked
+                                        && let Some(points) = &annotation.points
+                                            && let Some(vertex_idx) = hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0) {
                                                 vertex_drag = Some((annotation.id, vertex_idx, points[vertex_idx]));
                                                 if !app.selected.contains(&annotation.id) {
                                                     if shift_held {
@@ -481,8 +460,6 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                                 }
                                                 break;
                                             }
-                                        }
-                                    }
                                 }
                             }
 
@@ -501,8 +478,8 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             // 2. Check resize handle on selected UNLOCKED box annotations
                             if !handled {
                                 for &selected_id in &app.selected {
-                                    if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
-                                        if annotation.points.is_none() {
+                                    if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked)
+                                        && annotation.points.is_none() {
                                             let rect = annotation_screen_rect(annotation, image_rect, image_size);
                                             if let Some(handle) = hit_resize_handle(rect, pointer) {
                                                 app.history.begin_edit(app.current_snapshot());
@@ -520,7 +497,6 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                                 break;
                                             }
                                         }
-                                    }
                                 }
                             }
 
@@ -556,7 +532,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                         app.select_single(id);
                                     }
 
-                                    let initial_positions: Vec<(u32, f32, f32, Option<Vec<[f32; 2]>>)> = app
+                                    let initial_positions: Vec<crate::models::InitialMovePosition> = app
                                         .annotations
                                         .iter()
                                         .filter(|a| app.selected.contains(&a.id) && !a.locked)
@@ -596,10 +572,9 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         }
                     }
                 }
-            }
 
-            if response.dragged_by(PointerButton::Primary) && !space_held {
-                if let Some(pointer) = response.interact_pointer_pos() {
+            if response.dragged_by(PointerButton::Primary) && !space_held
+                && let Some(pointer) = response.interact_pointer_pos() {
                     if let Some(active_drag) = &app.active_drag {
                         let delta_screen = pointer - active_drag_start_pointer(active_drag);
                         let delta_x = delta_screen.x / image_rect.width() * image_size.x;
@@ -707,8 +682,8 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                             annotation.height = (max_y - initial_y).round();
                                         }
                                     }
-                                    if let Some(init_pts) = initial_points {
-                                        if *initial_w > 0.0 && *initial_h > 0.0 {
+                                    if let Some(init_pts) = initial_points
+                                        && *initial_w > 0.0 && *initial_h > 0.0 {
                                             let scaled: Vec<[f32; 2]> = init_pts
                                                 .iter()
                                                 .map(|&[px, py]| {
@@ -722,7 +697,6 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                                 .collect();
                                             annotation.points = Some(scaled);
                                         }
-                                    }
                                 }
                             }
                             ActiveDrag::MoveVertex {
@@ -742,9 +716,9 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     (delta_x, delta_y)
                                 };
 
-                                if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == *id) {
-                                    if let Some(points) = &mut annotation.points {
-                                        if *vertex_idx < points.len() {
+                                if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == *id)
+                                    && let Some(points) = &mut annotation.points
+                                        && *vertex_idx < points.len() {
                                             let new_x = (initial_point[0] + eff_dx).clamp(0.0, image_size.x).round();
                                             let new_y = (initial_point[1] + eff_dy).clamp(0.0, image_size.y).round();
                                             points[*vertex_idx] = [new_x, new_y];
@@ -757,8 +731,6 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                             annotation.height = bb_h.round();
                                             app.status = format!("MOVING VERTEX #{}/{}: X: {:.0}, Y: {:.0}", vertex_idx + 1, points.len(), new_x, new_y);
                                         }
-                                    }
-                                }
                             }
                         }
                     } else if let Some(draft) = &mut app.draft {
@@ -767,17 +739,15 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         marquee.current = image_rect.clamp(pointer);
                     }
                 }
-            }
 
             if response.drag_stopped_by(PointerButton::Primary) {
-                if let Some(active_drag) = app.active_drag.take() {
-                    if !matches!(active_drag, ActiveDrag::MinimapPan { .. }) {
+                if let Some(active_drag) = app.active_drag.take()
+                    && !matches!(active_drag, ActiveDrag::MinimapPan { .. }) {
                         app.history.commit_edit(&app.current_snapshot());
                         if let ActiveDrag::MoveVertex { vertex_idx, .. } = active_drag {
                             app.status = format!("VERTEX #{} MOVED", vertex_idx + 1);
                         }
                     }
-                }
                 if let Some(draft) = app.draft.take() {
                     let rect = Rect::from_two_pos(draft.start, draft.current);
 
@@ -845,9 +815,9 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 update_hierarchy(&mut app.annotations);
             }
 
-            if response.clicked() && !response.double_clicked() {
-                if let Some(pointer) = response.interact_pointer_pos() {
-                    if minimap_rect.map_or(false, |r| r.contains(pointer)) {
+            if response.clicked() && !response.double_clicked()
+                && let Some(pointer) = response.interact_pointer_pos() {
+                    if minimap_rect.is_some_and(|r| r.contains(pointer)) {
                         if let Some(m_img_rect) = minimap_img_rect {
                             app.pan = pan_from_minimap_click(pointer, m_img_rect, display_size, canvas.size());
                         }
@@ -878,14 +848,12 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             // 1. Check if clicking on a vertex of a selected unlocked polygon
                             let mut clicked_vertex = None;
                             for &selected_id in &app.selected {
-                                if let Some(anno) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
-                                    if let Some(points) = &anno.points {
-                                        if let Some(v_idx) = hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0) {
+                                if let Some(anno) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked)
+                                    && let Some(points) = &anno.points
+                                        && let Some(v_idx) = hit_polygon_vertex(points, image_rect, image_size, pointer, 12.0) {
                                             clicked_vertex = Some((selected_id, v_idx, points.len()));
                                             break;
                                         }
-                                    }
-                                }
                             }
 
                             if let Some((id, v_idx, count)) = clicked_vertex {
@@ -908,7 +876,6 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         }
                     }
                 }
-            }
 
             let editing_id = app.editing_label;
             let selected_ids = app.selected.clone();
@@ -924,17 +891,17 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         .iter()
                         .map(|&[px, py]| image_to_screen(Pos2::new(px, py), image_rect, image_size))
                         .collect();
-                    let h_vertex = if hovered_polygon_vertex.map_or(false, |(id, _)| id == annotation.id) {
+                    let h_vertex = if hovered_polygon_vertex.is_some_and(|(id, _)| id == annotation.id) {
                         hovered_polygon_vertex.map(|(_, idx)| idx)
                     } else {
                         None
                     };
-                    let sel_vertex = if app.selected_vertex.map_or(false, |(id, _)| id == annotation.id) {
+                    let sel_vertex = if app.selected_vertex.is_some_and(|(id, _)| id == annotation.id) {
                         app.selected_vertex.map(|(_, idx)| idx)
                     } else {
                         None
                     };
-                    let edge_hint = if hovered_edge_hint.map_or(false, |(id, _)| id == annotation.id) {
+                    let edge_hint = if hovered_edge_hint.is_some_and(|(id, _)| id == annotation.id) {
                         hovered_edge_hint.map(|(_, proj)| proj)
                     } else {
                         None
@@ -1015,8 +982,8 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     canvas_applied = Some((preset.color, tag));
                                     app.autocomplete_nav = None;
                                 }
-                            } else if tab_pressed {
-                                if let Some((_, preset)) = suggestions.first() {
+                            } else if tab_pressed
+                                && let Some((_, preset)) = suggestions.first() {
                                     let tag = next_category_label_from_labels(
                                         &preset.prefix,
                                         other_labels.iter().filter(|(id, _)| *id != annotation.id).map(|(_, l)| l.as_str()),
@@ -1024,7 +991,6 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     canvas_applied = Some((preset.color, tag));
                                     app.autocomplete_nav = None;
                                 }
-                            }
                         }
 
                         if edit.has_focus() {
@@ -1195,8 +1161,8 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
             }
 
             // Minimap Overview Overlay
-            if show_minimap {
-                if let (Some(m_rect), Some(m_img_rect)) = (minimap_rect, minimap_img_rect) {
+            if show_minimap
+                && let (Some(m_rect), Some(m_img_rect)) = (minimap_rect, minimap_img_rect) {
                     painter.rect_filled(m_rect, 3.0, Color32::from_black_alpha(225));
                     painter.rect_stroke(m_rect, 3.0, Stroke::new(1.0_f32, Color32::from_gray(55)));
 
@@ -1250,7 +1216,6 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     );
                     painter.rect_stroke(vp_rect, 0.0, Stroke::new(1.5_f32, RED));
                 }
-            }
         });
 }
 
@@ -1267,10 +1232,14 @@ pub fn calculate_minimap_viewport(
     {
         return minimap_img_rect;
     }
-    let norm_min_x = ((visible.left() - image_screen_rect.left()) / image_screen_rect.width()).clamp(0.0, 1.0);
-    let norm_min_y = ((visible.top() - image_screen_rect.top()) / image_screen_rect.height()).clamp(0.0, 1.0);
-    let norm_max_x = ((visible.right() - image_screen_rect.left()) / image_screen_rect.width()).clamp(0.0, 1.0);
-    let norm_max_y = ((visible.bottom() - image_screen_rect.top()) / image_screen_rect.height()).clamp(0.0, 1.0);
+    let norm_min_x =
+        ((visible.left() - image_screen_rect.left()) / image_screen_rect.width()).clamp(0.0, 1.0);
+    let norm_min_y =
+        ((visible.top() - image_screen_rect.top()) / image_screen_rect.height()).clamp(0.0, 1.0);
+    let norm_max_x =
+        ((visible.right() - image_screen_rect.left()) / image_screen_rect.width()).clamp(0.0, 1.0);
+    let norm_max_y =
+        ((visible.bottom() - image_screen_rect.top()) / image_screen_rect.height()).clamp(0.0, 1.0);
 
     let vp_min = Pos2::new(
         minimap_img_rect.left() + norm_min_x * minimap_img_rect.width(),
@@ -1289,8 +1258,10 @@ pub fn pan_from_minimap_click(
     display_size: Vec2,
     canvas_size: Vec2,
 ) -> Vec2 {
-    let norm_x = ((click_pos.x - minimap_img_rect.left()) / minimap_img_rect.width()).clamp(0.0, 1.0);
-    let norm_y = ((click_pos.y - minimap_img_rect.top()) / minimap_img_rect.height()).clamp(0.0, 1.0);
+    let norm_x =
+        ((click_pos.x - minimap_img_rect.left()) / minimap_img_rect.width()).clamp(0.0, 1.0);
+    let norm_y =
+        ((click_pos.y - minimap_img_rect.top()) / minimap_img_rect.height()).clamp(0.0, 1.0);
 
     let raw_pan = Vec2::new(0.5 - norm_x, 0.5 - norm_y) * display_size;
     clamp_pan(raw_pan, canvas_size, display_size)
@@ -1358,11 +1329,17 @@ mod tests {
         let annotations = vec![parent, child];
 
         // Click inside child body at (150, 150)
-        let hit = hit_annotation(&annotations, image_rect, image_size, Pos2::new(150.0, 150.0));
+        let hit = hit_annotation(
+            &annotations,
+            image_rect,
+            image_size,
+            Pos2::new(150.0, 150.0),
+        );
         assert_eq!(hit.map(|a| a.id), Some(2));
 
         // Click inside parent body but outside child at (50, 50)
-        let hit_parent = hit_annotation(&annotations, image_rect, image_size, Pos2::new(50.0, 50.0));
+        let hit_parent =
+            hit_annotation(&annotations, image_rect, image_size, Pos2::new(50.0, 50.0));
         assert_eq!(hit_parent.map(|a| a.id), Some(1));
     }
 
@@ -1371,7 +1348,8 @@ mod tests {
         let canvas = Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::new(800.0, 600.0));
         // Image centered at (400, 300) with size (1600, 1200) -> image spans (-400..1200, -300..900)
         let image_rect = Rect::from_center_size(canvas.center(), Vec2::new(1600.0, 1200.0));
-        let minimap_img_rect = Rect::from_min_size(Pos2::new(100.0, 100.0), Vec2::new(160.0, 120.0));
+        let minimap_img_rect =
+            Rect::from_min_size(Pos2::new(100.0, 100.0), Vec2::new(160.0, 120.0));
 
         let vp = calculate_minimap_viewport(image_rect, canvas, minimap_img_rect);
 
@@ -1388,30 +1366,49 @@ mod tests {
     fn test_pan_from_minimap_click() {
         let canvas_size = Vec2::new(800.0, 600.0);
         let display_size = Vec2::new(1600.0, 1200.0);
-        let minimap_img_rect = Rect::from_min_size(Pos2::new(100.0, 100.0), Vec2::new(160.0, 120.0));
+        let minimap_img_rect =
+            Rect::from_min_size(Pos2::new(100.0, 100.0), Vec2::new(160.0, 120.0));
 
         // Click center of minimap: (180, 160)
-        let pan_center = pan_from_minimap_click(Pos2::new(180.0, 160.0), minimap_img_rect, display_size, canvas_size);
+        let pan_center = pan_from_minimap_click(
+            Pos2::new(180.0, 160.0),
+            minimap_img_rect,
+            display_size,
+            canvas_size,
+        );
         assert!((pan_center.x).abs() < 0.01);
         assert!((pan_center.y).abs() < 0.01);
 
         // Click top-left of minimap: (100, 100) -> pans to show top-left of image
-        let pan_tl = pan_from_minimap_click(Pos2::new(100.0, 100.0), minimap_img_rect, display_size, canvas_size);
+        let pan_tl = pan_from_minimap_click(
+            Pos2::new(100.0, 100.0),
+            minimap_img_rect,
+            display_size,
+            canvas_size,
+        );
         // limit is (1600 - 800) * 0.5 = 400 for x, (1200 - 600) * 0.5 = 300 for y
         assert_eq!(pan_tl, Vec2::new(400.0, 300.0));
 
         // Click bottom-right of minimap: (260, 220) -> pans to show bottom-right of image
-        let pan_br = pan_from_minimap_click(Pos2::new(260.0, 220.0), minimap_img_rect, display_size, canvas_size);
+        let pan_br = pan_from_minimap_click(
+            Pos2::new(260.0, 220.0),
+            minimap_img_rect,
+            display_size,
+            canvas_size,
+        );
         assert_eq!(pan_br, Vec2::new(-400.0, -300.0));
     }
 
     #[test]
     fn test_polygon_mode_does_not_select_existing_rectangle() {
-        let mut app = crate::app::AnnotatorApp::default();
-        app.tool_mode = ToolMode::Polygon;
+        let mut app = crate::app::AnnotatorApp {
+            tool_mode: ToolMode::Polygon,
+            ..Default::default()
+        };
 
         // Existing rectangle (0,0) to (200,200) with id 1
-        app.annotations.push(sample_annotation(1, 0.0, 0.0, 200.0, 200.0));
+        app.annotations
+            .push(sample_annotation(1, 0.0, 0.0, 200.0, 200.0));
         app.next_id = 2;
         assert!(app.selected.is_empty());
 
@@ -1432,7 +1429,11 @@ mod tests {
         // New polygon (id 0 or next_id) is selected, not the container rectangle
         assert_eq!(app.selected.len(), 1);
         let selected_id = *app.selected.iter().next().unwrap();
-        let selected_anno = app.annotations.iter().find(|a| a.id == selected_id).unwrap();
+        let selected_anno = app
+            .annotations
+            .iter()
+            .find(|a| a.id == selected_id)
+            .unwrap();
         assert!(selected_anno.points.is_some());
     }
 
@@ -1504,11 +1505,14 @@ mod tests {
 
     #[test]
     fn test_select_mode_vs_rectangle_mode() {
-        let mut app = crate::app::AnnotatorApp::default();
-        app.tool_mode = ToolMode::Select;
+        let mut app = crate::app::AnnotatorApp {
+            tool_mode: ToolMode::Select,
+            ..Default::default()
+        };
         assert_eq!(app.tool_mode, ToolMode::Select);
 
-        app.annotations.push(sample_annotation(1, 0.0, 0.0, 100.0, 100.0));
+        app.annotations
+            .push(sample_annotation(1, 0.0, 0.0, 100.0, 100.0));
         app.select_single(1);
         assert!(app.is_selected(1));
 

@@ -88,7 +88,10 @@ pub fn draw_surveillance_box(
         let icon_center = Pos2::new(tag_rect.left() + 8.0, tag_rect.center().y);
         draw_lucide_lock(painter, icon_center, 9.0, true, Color32::WHITE, 1.2);
         painter.galley(
-            Pos2::new(tag_rect.left() + 15.0, tag_rect.center().y - galley.size().y * 0.5),
+            Pos2::new(
+                tag_rect.left() + 15.0,
+                tag_rect.center().y - galley.size().y * 0.5,
+            ),
             galley,
             Color32::WHITE,
         );
@@ -121,6 +124,7 @@ pub fn draw_surveillance_box(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw_polygon_annotation(
     painter: &egui::Painter,
     screen_points: &[Pos2],
@@ -150,8 +154,13 @@ pub fn draw_polygon_annotation(
     // Semi-transparent polygon fill
     if screen_points.len() >= 3 {
         let fill_alpha = if selected { 45 } else { 25 };
-        let fill_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), fill_alpha);
-        painter.add(egui::Shape::convex_polygon(screen_points.to_vec(), fill_color, Stroke::NONE));
+        let fill_color =
+            Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), fill_alpha);
+        painter.add(egui::Shape::convex_polygon(
+            screen_points.to_vec(),
+            fill_color,
+            Stroke::NONE,
+        ));
     }
 
     // Polygon boundary outline
@@ -168,10 +177,26 @@ pub fn draw_polygon_annotation(
 
     // Edge insertion preview handle (when hovering near an edge in Select mode)
     if let Some(hint_pos) = edge_insert_hint {
-        painter.circle_filled(hint_pos, 4.5, Color32::from_rgba_unmultiplied(255, 255, 255, 230));
+        painter.circle_filled(
+            hint_pos,
+            4.5,
+            Color32::from_rgba_unmultiplied(255, 255, 255, 230),
+        );
         painter.circle_stroke(hint_pos, 4.5, Stroke::new(1.2_f32, color));
-        painter.line_segment([Pos2::new(hint_pos.x - 2.5, hint_pos.y), Pos2::new(hint_pos.x + 2.5, hint_pos.y)], Stroke::new(1.2_f32, color));
-        painter.line_segment([Pos2::new(hint_pos.x, hint_pos.y - 2.5), Pos2::new(hint_pos.x, hint_pos.y + 2.5)], Stroke::new(1.2_f32, color));
+        painter.line_segment(
+            [
+                Pos2::new(hint_pos.x - 2.5, hint_pos.y),
+                Pos2::new(hint_pos.x + 2.5, hint_pos.y),
+            ],
+            Stroke::new(1.2_f32, color),
+        );
+        painter.line_segment(
+            [
+                Pos2::new(hint_pos.x, hint_pos.y - 2.5),
+                Pos2::new(hint_pos.x, hint_pos.y + 2.5),
+            ],
+            Stroke::new(1.2_f32, color),
+        );
     }
 
     // Vertex handles (interactive when selected and unlocked)
@@ -182,7 +207,11 @@ pub fn draw_polygon_annotation(
 
             if is_selected_v {
                 // High-visibility active selected vertex with accent ring and central core
-                painter.circle_stroke(pt, 7.0, Stroke::new(2.0_f32, Color32::from_rgb(255, 220, 0)));
+                painter.circle_stroke(
+                    pt,
+                    7.0,
+                    Stroke::new(2.0_f32, Color32::from_rgb(255, 220, 0)),
+                );
                 painter.circle_filled(pt, 5.0, Color32::WHITE);
                 painter.circle_filled(pt, 2.5, color);
             } else if is_hovered_v {
@@ -208,10 +237,14 @@ pub fn draw_polygon_annotation(
         label
     };
 
-    let galley = painter.layout_no_wrap(text.to_uppercase(), FontId::monospace(10.0), Color32::WHITE);
+    let galley =
+        painter.layout_no_wrap(text.to_uppercase(), FontId::monospace(10.0), Color32::WHITE);
     let extra_lock_w = if locked { 14.0 } else { 0.0 };
     let tag_size = galley.size() + Vec2::new(10.0 + extra_lock_w, 6.0);
-    let tag_rect = Rect::from_min_size(Pos2::new(bounding_rect.left(), bounding_rect.top() - tag_size.y), tag_size);
+    let tag_rect = Rect::from_min_size(
+        Pos2::new(bounding_rect.left(), bounding_rect.top() - tag_size.y),
+        tag_size,
+    );
     let tag_rect = if tag_rect.top() < painter.clip_rect().top() {
         Rect::from_min_size(bounding_rect.min, tag_size)
     } else {
@@ -223,7 +256,10 @@ pub fn draw_polygon_annotation(
         let icon_center = Pos2::new(tag_rect.left() + 8.0, tag_rect.center().y);
         draw_lucide_lock(painter, icon_center, 9.0, true, Color32::WHITE, 1.2);
         painter.galley(
-            Pos2::new(tag_rect.left() + 15.0, tag_rect.center().y - galley.size().y * 0.5),
+            Pos2::new(
+                tag_rect.left() + 15.0,
+                tag_rect.center().y - galley.size().y * 0.5,
+            ),
             galley,
             Color32::WHITE,
         );
@@ -312,8 +348,13 @@ pub fn draw_draft_polygon(
 
     // Render draft label tag near first point
     let tag_pos = screen_points[0] - Vec2::new(0.0, 20.0);
-    let galley = painter.layout_no_wrap(label.to_uppercase(), FontId::monospace(9.5), Color32::WHITE);
+    let galley =
+        painter.layout_no_wrap(label.to_uppercase(), FontId::monospace(9.5), Color32::WHITE);
     let tag_rect = Rect::from_min_size(tag_pos, galley.size() + Vec2::new(8.0, 4.0));
     painter.rect_filled(tag_rect, 0.0, color);
-    painter.galley(tag_rect.center() - galley.size() * 0.5, galley, Color32::WHITE);
+    painter.galley(
+        tag_rect.center() - galley.size() * 0.5,
+        galley,
+        Color32::WHITE,
+    );
 }

@@ -1,6 +1,6 @@
-use eframe::egui::{self, Color32, FontId, Margin, Pos2, Rect, RichText, Stroke, Vec2};
 use crate::app::AnnotatorApp;
 use crate::theme::{MUTED, PANEL, RED};
+use eframe::egui::{self, Color32, FontId, Margin, Pos2, Rect, RichText, Stroke, Vec2};
 
 pub fn render_bottom_bar(app: &mut AnnotatorApp, ctx: &egui::Context) {
     let is_batch = app.dataset_folder.is_some() || app.image_files.len() > 1;
@@ -11,7 +11,11 @@ pub fn render_bottom_bar(app: &mut AnnotatorApp, ctx: &egui::Context) {
     let mut switch_to_idx = None;
     let current_idx = app.current_image_idx.unwrap_or(0);
     let total_images = app.image_files.len();
-    let total_annotated = app.image_files.iter().filter(|p| app.image_annotation_count(p) > 0).count();
+    let total_annotated = app
+        .image_files
+        .iter()
+        .filter(|p| app.image_annotation_count(p) > 0)
+        .count();
     let filtered_indices = app.filtered_image_indices();
 
     egui::TopBottomPanel::bottom("dataset_bottom_bar")
@@ -62,10 +66,8 @@ pub fn render_bottom_bar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                 let is_active = Some(idx) == app.current_image_idx;
                                 let count = app.image_annotation_count(&path);
 
-                                let file_name = path
-                                    .file_name()
-                                    .and_then(|n| n.to_str())
-                                    .unwrap_or("image");
+                                let file_name =
+                                    path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
 
                                 let card_size = Vec2::new(52.0, 44.0);
                                 let (card_rect, response) =
@@ -111,8 +113,10 @@ pub fn render_bottom_bar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                             (max_h * aspect, max_h)
                                         };
 
-                                        let img_rect =
-                                            Rect::from_center_size(thumb_area.center(), Vec2::new(w, h));
+                                        let img_rect = Rect::from_center_size(
+                                            thumb_area.center(),
+                                            Vec2::new(w, h),
+                                        );
                                         painter.image(
                                             tex.id(),
                                             img_rect,
@@ -139,8 +143,14 @@ pub fn render_bottom_bar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                                     // Bottom label bar (Sharp)
                                     let label_rect = Rect::from_min_max(
-                                        Pos2::new(card_rect.left() + 1.0, card_rect.bottom() - 13.0),
-                                        Pos2::new(card_rect.right() - 1.0, card_rect.bottom() - 1.0),
+                                        Pos2::new(
+                                            card_rect.left() + 1.0,
+                                            card_rect.bottom() - 13.0,
+                                        ),
+                                        Pos2::new(
+                                            card_rect.right() - 1.0,
+                                            card_rect.bottom() - 1.0,
+                                        ),
                                     );
                                     let label_text = format!("#{:02}", idx + 1);
                                     painter.text(
@@ -158,10 +168,17 @@ pub fn render_bottom_bar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     // Sharp annotation badge (top-right corner)
                                     if count > 0 {
                                         let badge_rect = Rect::from_min_size(
-                                            Pos2::new(card_rect.right() - 6.0, card_rect.top() + 2.0),
+                                            Pos2::new(
+                                                card_rect.right() - 6.0,
+                                                card_rect.top() + 2.0,
+                                            ),
                                             Vec2::splat(4.0),
                                         );
-                                        painter.rect_filled(badge_rect, 0.0, Color32::from_rgb(0, 230, 118));
+                                        painter.rect_filled(
+                                            badge_rect,
+                                            0.0,
+                                            Color32::from_rgb(0, 230, 118),
+                                        );
                                     }
                                 }
 
@@ -203,9 +220,13 @@ pub fn render_bottom_bar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                     let auto_save_btn = ui.add(
                         egui::Button::new(
-                            RichText::new(if app.auto_save_dataset { "AUTO-SAVE: ON" } else { "AUTO-SAVE: OFF" })
-                                .font(FontId::monospace(9.0))
-                                .color(auto_save_color),
+                            RichText::new(if app.auto_save_dataset {
+                                "AUTO-SAVE: ON"
+                            } else {
+                                "AUTO-SAVE: OFF"
+                            })
+                            .font(FontId::monospace(9.0))
+                            .color(auto_save_color),
                         )
                         .fill(Color32::from_gray(22))
                         .rounding(0.0)

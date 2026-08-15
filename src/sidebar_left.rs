@@ -1,8 +1,10 @@
-use eframe::egui::{self, Color32, FontFamily, FontId, Margin, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use crate::app::AnnotatorApp;
 use crate::models::{FilmstripFilter, ToolMode};
 use crate::render::draw_lucide_lock;
 use crate::theme::{MUTED, PANEL, RED};
+use eframe::egui::{
+    self, Color32, FontFamily, FontId, Margin, Pos2, Rect, RichText, Sense, Stroke, Vec2,
+};
 
 pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
     egui::SidePanel::left("left_sidebar")
@@ -17,12 +19,7 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
             ui.add_space(4.0);
 
             ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("TOOL")
-                        .size(9.5)
-                        .strong()
-                        .color(MUTED),
-                );
+                ui.label(RichText::new("TOOL").size(9.5).strong().color(MUTED));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     let avail_w = ((ui.available_width() - 4.0) / 3.0).floor();
@@ -37,8 +34,19 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                 .strong()
                                 .color(if is_poly { Color32::WHITE } else { MUTED }),
                         )
-                        .fill(if is_poly { Color32::from_rgb(30, 60, 120) } else { Color32::from_gray(22) })
-                        .stroke(Stroke::new(1.0_f32, if is_poly { Color32::from_rgb(70, 130, 240) } else { Color32::from_gray(42) }))
+                        .fill(if is_poly {
+                            Color32::from_rgb(30, 60, 120)
+                        } else {
+                            Color32::from_gray(22)
+                        })
+                        .stroke(Stroke::new(
+                            1.0_f32,
+                            if is_poly {
+                                Color32::from_rgb(70, 130, 240)
+                            } else {
+                                Color32::from_gray(42)
+                            },
+                        ))
                         .rounding(0.0),
                     );
                     if poly_btn.clicked() {
@@ -61,8 +69,19 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                 .strong()
                                 .color(if is_rect { Color32::WHITE } else { MUTED }),
                         )
-                        .fill(if is_rect { Color32::from_rgb(30, 60, 120) } else { Color32::from_gray(22) })
-                        .stroke(Stroke::new(1.0_f32, if is_rect { Color32::from_rgb(70, 130, 240) } else { Color32::from_gray(42) }))
+                        .fill(if is_rect {
+                            Color32::from_rgb(30, 60, 120)
+                        } else {
+                            Color32::from_gray(22)
+                        })
+                        .stroke(Stroke::new(
+                            1.0_f32,
+                            if is_rect {
+                                Color32::from_rgb(70, 130, 240)
+                            } else {
+                                Color32::from_gray(42)
+                            },
+                        ))
                         .rounding(0.0),
                     );
                     if rect_btn.clicked() {
@@ -83,8 +102,19 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                 .strong()
                                 .color(if is_select { Color32::WHITE } else { MUTED }),
                         )
-                        .fill(if is_select { Color32::from_rgb(30, 60, 120) } else { Color32::from_gray(22) })
-                        .stroke(Stroke::new(1.0_f32, if is_select { Color32::from_rgb(70, 130, 240) } else { Color32::from_gray(42) }))
+                        .fill(if is_select {
+                            Color32::from_rgb(30, 60, 120)
+                        } else {
+                            Color32::from_gray(22)
+                        })
+                        .stroke(Stroke::new(
+                            1.0_f32,
+                            if is_select {
+                                Color32::from_rgb(70, 130, 240)
+                            } else {
+                                Color32::from_gray(42)
+                            },
+                        ))
                         .rounding(0.0),
                     );
                     if select_btn.clicked() {
@@ -105,7 +135,11 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
             if !app.image_files.is_empty() {
                 let current_idx = app.current_image_idx.unwrap_or(0);
                 let total_images = app.image_files.len();
-                let total_annotated = app.image_files.iter().filter(|p| app.image_annotation_count(p) > 0).count();
+                let total_annotated = app
+                    .image_files
+                    .iter()
+                    .filter(|p| app.image_annotation_count(p) > 0)
+                    .count();
                 let total_unannotated = total_images.saturating_sub(total_annotated);
                 let folder_name = app
                     .dataset_folder
@@ -115,12 +149,7 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     .unwrap_or("BATCH");
 
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("DATASET")
-                            .size(9.0)
-                            .strong()
-                            .color(MUTED),
-                    );
+                    ui.label(RichText::new("DATASET").size(9.0).strong().color(MUTED));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             RichText::new(format!("{:02}/{:02}", current_idx + 1, total_images))
@@ -149,8 +178,14 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                     let filters = [
                         (FilmstripFilter::All, format!("ALL ({total_images})")),
-                        (FilmstripFilter::Annotated, format!("DONE ({total_annotated})")),
-                        (FilmstripFilter::Unannotated, format!("TODO ({total_unannotated})")),
+                        (
+                            FilmstripFilter::Annotated,
+                            format!("DONE ({total_annotated})"),
+                        ),
+                        (
+                            FilmstripFilter::Unannotated,
+                            format!("TODO ({total_unannotated})"),
+                        ),
                     ];
 
                     for (filter, label) in filters {
@@ -164,8 +199,19 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     .strong()
                                     .color(if is_active { Color32::WHITE } else { MUTED }),
                             )
-                            .fill(if is_active { Color32::from_rgb(38, 26, 26) } else { Color32::from_gray(18) })
-                            .stroke(Stroke::new(1.0_f32, if is_active { RED } else { Color32::from_gray(38) }))
+                            .fill(if is_active {
+                                Color32::from_rgb(38, 26, 26)
+                            } else {
+                                Color32::from_gray(18)
+                            })
+                            .stroke(Stroke::new(
+                                1.0_f32,
+                                if is_active {
+                                    RED
+                                } else {
+                                    Color32::from_gray(38)
+                                },
+                            ))
                             .rounding(0.0),
                         );
                         if btn.clicked() {
@@ -185,7 +231,10 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
             ui.horizontal(|ui| {
                 let arrow = if presets_open { "▼" } else { "▶" };
                 if ui
-                    .add(egui::Button::new(RichText::new(arrow).monospace().size(8.0).color(MUTED)).frame(false))
+                    .add(
+                        egui::Button::new(RichText::new(arrow).monospace().size(8.0).color(MUTED))
+                            .frame(false),
+                    )
                     .clicked()
                 {
                     presets_open = !presets_open;
@@ -200,11 +249,15 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if let Some(active) = app.presets.get(app.active_preset_idx) {
                         ui.label(
-                            RichText::new(format!("[{}] {}", app.active_preset_idx + 1, active.prefix.to_uppercase()))
-                                .size(9.0)
-                                .monospace()
-                                .strong()
-                                .color(active.color32()),
+                            RichText::new(format!(
+                                "[{}] {}",
+                                app.active_preset_idx + 1,
+                                active.prefix.to_uppercase()
+                            ))
+                            .size(9.0)
+                            .monospace()
+                            .strong()
+                            .color(active.color32()),
                         );
                     }
                 });
@@ -229,7 +282,11 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     .monospace()
                                     .color(if is_active { Color32::WHITE } else { MUTED }),
                             )
-                            .fill(if is_active { Color32::from_gray(36) } else { Color32::TRANSPARENT })
+                            .fill(if is_active {
+                                Color32::from_gray(36)
+                            } else {
+                                Color32::TRANSPARENT
+                            })
                             .frame(is_active),
                         );
                         if badge_resp.clicked() {
@@ -244,7 +301,14 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             ui.painter().rect_stroke(
                                 swatch_rect,
                                 2.0,
-                                Stroke::new(1.0_f32, if is_active { Color32::WHITE } else { Color32::from_gray(60) }),
+                                Stroke::new(
+                                    1.0_f32,
+                                    if is_active {
+                                        Color32::WHITE
+                                    } else {
+                                        Color32::from_gray(60)
+                                    },
+                                ),
                             );
                         }
                         if swatch_resp.clicked() {
@@ -264,7 +328,8 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     &mut color32,
                                     egui::color_picker::Alpha::Opaque,
                                 ) {
-                                    app.presets[idx].color = [color32.r(), color32.g(), color32.b()];
+                                    app.presets[idx].color =
+                                        [color32.r(), color32.g(), color32.b()];
                                 }
                             },
                         );
@@ -273,7 +338,11 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             egui::TextEdit::singleline(&mut app.presets[idx].prefix)
                                 .font(FontId::monospace(9.5))
                                 .desired_width(ui.available_width())
-                                .text_color(if is_active { Color32::WHITE } else { Color32::from_gray(190) }),
+                                .text_color(if is_active {
+                                    Color32::WHITE
+                                } else {
+                                    Color32::from_gray(190)
+                                }),
                         );
                         if edit.clicked() {
                             apply_idx = Some(idx);
@@ -303,12 +372,7 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     } else {
                         app.annotations.len().to_string()
                     };
-                    ui.label(
-                        RichText::new(count_text)
-                            .size(11.0)
-                            .strong()
-                            .color(RED),
-                    );
+                    ui.label(RichText::new(count_text).size(11.0).strong().color(RED));
                 });
             });
 
@@ -367,7 +431,12 @@ fn render_tree_branch(
         let Some(a) = app.annotations.iter().find(|a| a.id == annotation_id) else {
             return;
         };
-        (a.label.clone(), a.color32(), app.is_selected(annotation_id), a.locked)
+        (
+            a.label.clone(),
+            a.color32(),
+            app.is_selected(annotation_id),
+            a.locked,
+        )
     };
 
     let children_ids: Vec<u32> = app
@@ -382,10 +451,8 @@ fn render_tree_branch(
     let mut is_open: bool = ui.data_mut(|d| *d.get_temp_mut_or(open_id, true));
 
     let row_height = 24.0;
-    let row_rect = Rect::from_min_size(
-        ui.cursor().min,
-        Vec2::new(ui.available_width(), row_height),
-    );
+    let row_rect =
+        Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), row_height));
 
     let response = ui.allocate_rect(row_rect, Sense::click());
 
@@ -560,7 +627,11 @@ fn render_tree_branch(
     if lock_clicked {
         app.toggle_lock_annotation(annotation_id);
     } else if response.double_clicked() {
-        let is_locked = app.annotations.iter().find(|a| a.id == annotation_id).map_or(false, |a| a.locked);
+        let is_locked = app
+            .annotations
+            .iter()
+            .find(|a| a.id == annotation_id)
+            .is_some_and(|a| a.locked);
         if !is_locked {
             app.select_single(annotation_id);
             app.history.begin_edit(app.current_snapshot());
@@ -588,14 +659,7 @@ fn render_tree_branch(
 
         for (c_idx, &child_id) in children_ids.iter().enumerate() {
             let is_last_child = c_idx == total_children - 1;
-            render_tree_branch(
-                ui,
-                app,
-                child_id,
-                depth + 1,
-                &new_ancestors,
-                is_last_child,
-            );
+            render_tree_branch(ui, app, child_id, depth + 1, &new_ancestors, is_last_child);
         }
     }
 }

@@ -1,17 +1,17 @@
+use eframe::egui::{self, Key};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use eframe::egui::{self, Key};
 
 use crate::bottom_bar::render_bottom_bar;
 use crate::canvas::render_canvas;
 use crate::dataset::{check_sidecar_annotation_count, scan_image_folder};
 use crate::geometry::update_hierarchy;
 use crate::history::{AppSnapshot, History};
-use crate::menubar::{handle_native_menu_events, NativeMenuBar};
+use crate::menubar::{NativeMenuBar, handle_native_menu_events};
 use crate::models::{
-    assign_preset_to_annotations, default_presets, export_annotation_tree, next_category_label,
     ActiveDrag, Annotation, AnnotationFile, BatchProjectFile, ClassPreset, Draft, DraftPolygon,
     FilmstripFilter, LoadedImage, ProjectFile, ToolMode, UnifiedDatasetExport, UnifiedImageExport,
+    assign_preset_to_annotations, default_presets, export_annotation_tree, next_category_label,
 };
 use crate::sidebar_left::render_left_sidebar;
 use crate::sidebar_right::render_right_sidebar;
@@ -30,6 +30,64 @@ fn resolve_image_path(anno_path: &Path, image_str: &str) -> PathBuf {
     }
 
     raw_path
+}
+
+pub fn sanitize_filename(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let trimmed = sanitized.trim_matches('_');
+    if trimmed.is_empty() {
+        "region".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+pub fn crop_annotation_to_rgba(
+    img: &image::DynamicImage,
+    anno: &Annotation,
+) -> Option<image::RgbaImage> {
+    let img_w = img.width();
+    let img_h = img.height();
+
+    let x = (anno.x.max(0.0).round() as u32).min(img_w);
+    let y = (anno.y.max(0.0).round() as u32).min(img_h);
+    let w = (anno.width.round().max(1.0) as u32).min(img_w.saturating_sub(x));
+    let h = (anno.height.round().max(1.0) as u32).min(img_h.saturating_sub(y));
+
+    if w == 0 || h == 0 {
+        return None;
+    }
+
+    let mut cropped = image::imageops::crop_imm(img, x, y, w, h).to_image();
+
+    // If polygon points are present, mask out pixels outside polygon with transparency
+    if let Some(points) = &anno.points {
+        let poly_local: Vec<egui::Pos2> = points
+            .iter()
+            .map(|p| egui::Pos2::new(p[0] - x as f32, p[1] - y as f32))
+            .collect();
+
+        for py in 0..h {
+            for px in 0..w {
+                let p = egui::Pos2::new(px as f32 + 0.5, py as f32 + 0.5);
+                if !crate::geometry::point_in_polygon(p, &poly_local) {
+                    let pixel = cropped.get_pixel_mut(px, py);
+                    pixel[3] = 0;
+                }
+            }
+        }
+    }
+
+    Some(cropped)
 }
 
 pub struct AnnotatorApp {
@@ -147,7 +205,6 @@ impl Default for AnnotatorApp {
 }
 
 impl AnnotatorApp {
-
     pub fn finish_draft_polygon(&mut self) -> bool {
         let Some(poly) = self.draft_polygon.take() else {
             return false;
@@ -210,9 +267,15 @@ impl AnnotatorApp {
 
         if !self.selected.is_empty() {
             self.history.record(self.current_snapshot());
-            let count = assign_preset_to_annotations(&mut self.annotations, &self.selected, &preset);
+            let count =
+                assign_preset_to_annotations(&mut self.annotations, &self.selected, &preset);
             let prefix_upper = preset.prefix.to_uppercase();
-            self.status = format!("PRESET {}: {} APPLIED TO {} REGION(S)", idx + 1, prefix_upper, count);
+            self.status = format!(
+                "PRESET {}: {} APPLIED TO {} REGION(S)",
+                idx + 1,
+                prefix_upper,
+                count
+            );
         } else {
             let prefix_upper = preset.prefix.to_uppercase();
             self.status = format!("ACTIVE PRESET: {} (KEY {})", prefix_upper, idx + 1);
@@ -260,44 +323,45 @@ impl AnnotatorApp {
         }
 
         // If a specific polygon vertex is selected, nudge just that vertex
-        if let Some((id, v_idx)) = self.selected_vertex {
-            if let Some(image) = &self.image {
-                let img_w = image.width as f32;
-                let img_h = image.height as f32;
-                let is_unlocked = self.annotations.iter().any(|a| a.id == id && !a.locked);
-                if is_unlocked {
-                    if let Some(anno) = self.annotations.iter().find(|a| a.id == id) {
-                        if let Some(pts) = &anno.points {
-                            if v_idx < pts.len() {
-                                let curr_x = pts[v_idx][0];
-                                let curr_y = pts[v_idx][1];
-                                let new_x = (curr_x + dx).clamp(0.0, img_w).round();
-                                let new_y = (curr_y + dy).clamp(0.0, img_h).round();
-                                if new_x == curr_x && new_y == curr_y {
-                                    return false;
-                                }
-                                self.history.record(self.current_snapshot());
-                                if let Some(anno) = self.annotations.iter_mut().find(|a| a.id == id) {
-                                    if let Some(pts) = &mut anno.points {
-                                        pts[v_idx] = [new_x, new_y];
-                                        let poly_pos: Vec<egui::Pos2> = pts.iter().map(|p| egui::Pos2::new(p[0], p[1])).collect();
-                                        let (bb_x, bb_y, bb_w, bb_h) = crate::geometry::polygon_bounding_box(&poly_pos);
-                                        anno.x = bb_x.round();
-                                        anno.y = bb_y.round();
-                                        anno.width = bb_w.round();
-                                        anno.height = bb_h.round();
-                                    }
-                                }
-                                update_hierarchy(&mut self.annotations);
-                                self.status = format!("VERTEX #{}: ({:.0}, {:.0})", v_idx + 1, new_x, new_y);
-                                return true;
-                            }
-                        }
+        if let Some((id, v_idx)) = self.selected_vertex
+            && let Some(image) = &self.image
+        {
+            let img_w = image.width as f32;
+            let img_h = image.height as f32;
+            let is_unlocked = self.annotations.iter().any(|a| a.id == id && !a.locked);
+            if is_unlocked {
+                if let Some(anno) = self.annotations.iter().find(|a| a.id == id)
+                    && let Some(pts) = &anno.points
+                    && v_idx < pts.len()
+                {
+                    let curr_x = pts[v_idx][0];
+                    let curr_y = pts[v_idx][1];
+                    let new_x = (curr_x + dx).clamp(0.0, img_w).round();
+                    let new_y = (curr_y + dy).clamp(0.0, img_h).round();
+                    if new_x == curr_x && new_y == curr_y {
+                        return false;
                     }
-                } else {
-                    self.status = "LOCKED REGION(S) CANNOT BE MOVED".into();
-                    return false;
+                    self.history.record(self.current_snapshot());
+                    if let Some(anno) = self.annotations.iter_mut().find(|a| a.id == id)
+                        && let Some(pts) = &mut anno.points
+                    {
+                        pts[v_idx] = [new_x, new_y];
+                        let poly_pos: Vec<egui::Pos2> =
+                            pts.iter().map(|p| egui::Pos2::new(p[0], p[1])).collect();
+                        let (bb_x, bb_y, bb_w, bb_h) =
+                            crate::geometry::polygon_bounding_box(&poly_pos);
+                        anno.x = bb_x.round();
+                        anno.y = bb_y.round();
+                        anno.width = bb_w.round();
+                        anno.height = bb_h.round();
+                    }
+                    update_hierarchy(&mut self.annotations);
+                    self.status = format!("VERTEX #{}: ({:.0}, {:.0})", v_idx + 1, new_x, new_y);
+                    return true;
                 }
+            } else {
+                self.status = "LOCKED REGION(S) CANNOT BE MOVED".into();
+                return false;
             }
         }
 
@@ -371,33 +435,32 @@ impl AnnotatorApp {
     }
 
     pub fn delete_selected_vertex(&mut self) -> bool {
-        if let Some((id, v_idx)) = self.selected_vertex {
-            if let Some(anno) = self.annotations.iter().find(|a| a.id == id && !a.locked) {
-                if let Some(pts) = &anno.points {
-                    if pts.len() > 3 {
-                        self.history.record(self.current_snapshot());
-                        if let Some(anno) = self.annotations.iter_mut().find(|a| a.id == id) {
-                            if let Some(pts) = &mut anno.points {
-                                if v_idx < pts.len() {
-                                    pts.remove(v_idx);
-                                    let poly_pos: Vec<egui::Pos2> = pts.iter().map(|p| egui::Pos2::new(p[0], p[1])).collect();
-                                    let (bb_x, bb_y, bb_w, bb_h) = crate::geometry::polygon_bounding_box(&poly_pos);
-                                    anno.x = bb_x.round();
-                                    anno.y = bb_y.round();
-                                    anno.width = bb_w.round();
-                                    anno.height = bb_h.round();
-                                    self.status = format!("POLYGON VERTEX REMOVED ({} REMAINING)", pts.len());
-                                }
-                            }
-                        }
-                        self.selected_vertex = None;
-                        update_hierarchy(&mut self.annotations);
-                        return true;
-                    } else {
-                        self.status = "POLYGON REQUIRES AT LEAST 3 VERTICES".into();
-                        return true;
-                    }
+        if let Some((id, v_idx)) = self.selected_vertex
+            && let Some(anno) = self.annotations.iter().find(|a| a.id == id && !a.locked)
+            && let Some(pts) = &anno.points
+        {
+            if pts.len() > 3 {
+                self.history.record(self.current_snapshot());
+                if let Some(anno) = self.annotations.iter_mut().find(|a| a.id == id)
+                    && let Some(pts) = &mut anno.points
+                    && v_idx < pts.len()
+                {
+                    pts.remove(v_idx);
+                    let poly_pos: Vec<egui::Pos2> =
+                        pts.iter().map(|p| egui::Pos2::new(p[0], p[1])).collect();
+                    let (bb_x, bb_y, bb_w, bb_h) = crate::geometry::polygon_bounding_box(&poly_pos);
+                    anno.x = bb_x.round();
+                    anno.y = bb_y.round();
+                    anno.width = bb_w.round();
+                    anno.height = bb_h.round();
+                    self.status = format!("POLYGON VERTEX REMOVED ({} REMAINING)", pts.len());
                 }
+                self.selected_vertex = None;
+                update_hierarchy(&mut self.annotations);
+                return true;
+            } else {
+                self.status = "POLYGON REQUIRES AT LEAST 3 VERTICES".into();
+                return true;
             }
         }
         false
@@ -453,17 +516,16 @@ impl AnnotatorApp {
 
         self.history.record(self.current_snapshot());
 
-        for a in self.annotations.iter_mut().filter(|a| target_ids.contains(&a.id)) {
+        for a in self
+            .annotations
+            .iter_mut()
+            .filter(|a| target_ids.contains(&a.id))
+        {
             let x = a.x;
             let y = a.y;
             let w = a.width;
             let h = a.height;
-            a.points = Some(vec![
-                [x, y],
-                [x + w, y],
-                [x + w, y + h],
-                [x, y + h],
-            ]);
+            a.points = Some(vec![[x, y], [x + w, y], [x + w, y + h], [x, y + h]]);
         }
 
         self.status = if target_ids.len() == 1 {
@@ -535,7 +597,9 @@ impl AnnotatorApp {
     }
 
     pub fn preload_adjacent_images(&mut self) {
-        let Some(idx) = self.current_image_idx else { return };
+        let Some(idx) = self.current_image_idx else {
+            return;
+        };
         let total = self.image_files.len();
 
         let targets = [
@@ -669,10 +733,10 @@ impl AnnotatorApp {
     }
 
     pub fn image_annotation_count(&self, path: &Path) -> usize {
-        if let Some(current_img) = &self.image {
-            if current_img.path == path {
-                return self.annotations.len();
-            }
+        if let Some(current_img) = &self.image
+            && current_img.path == path
+        {
+            return self.annotations.len();
         }
         self.annotation_counts.get(path).copied().unwrap_or(0)
     }
@@ -759,7 +823,8 @@ impl AnnotatorApp {
 
         if let Ok(json) = serde_json::to_string_pretty(&project) {
             let _ = std::fs::write(&anno_path, json);
-            self.annotation_counts.insert(image.path.clone(), self.annotations.len());
+            self.annotation_counts
+                .insert(image.path.clone(), self.annotations.len());
         }
     }
 
@@ -864,10 +929,7 @@ impl AnnotatorApp {
 
         self.preload_adjacent_images();
 
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("image");
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
 
         if let (Some(idx), Some(img)) = (self.current_image_idx, &self.image) {
             let total = self.image_files.len();
@@ -970,10 +1032,7 @@ impl AnnotatorApp {
         }
 
         if batch.format_version != 1 {
-            self.status = format!(
-                "UNSUPPORTED ANNO BATCH VERSION: {}",
-                batch.format_version
-            );
+            self.status = format!("UNSUPPORTED ANNO BATCH VERSION: {}", batch.format_version);
             return;
         }
 
@@ -1067,16 +1126,16 @@ impl AnnotatorApp {
     }
 
     pub fn undo(&mut self) {
-        if let Some(poly) = &mut self.draft_polygon {
-            if poly.undo_point().is_some() {
-                if poly.points.is_empty() {
-                    self.draft_polygon = None;
-                    self.status = "PEN TOOL DRAWING CANCELED".into();
-                } else {
-                    self.status = format!("PEN TOOL: POINT UNDONE ({} REMAINING)", poly.points.len());
-                }
-                return;
+        if let Some(poly) = &mut self.draft_polygon
+            && poly.undo_point().is_some()
+        {
+            if poly.points.is_empty() {
+                self.draft_polygon = None;
+                self.status = "PEN TOOL DRAWING CANCELED".into();
+            } else {
+                self.status = format!("PEN TOOL: POINT UNDONE ({} REMAINING)", poly.points.len());
             }
+            return;
         }
 
         self.editing_label = None;
@@ -1093,11 +1152,11 @@ impl AnnotatorApp {
     }
 
     pub fn redo(&mut self) {
-        if let Some(poly) = &mut self.draft_polygon {
-            if poly.redo_point().is_some() {
-                self.status = format!("PEN TOOL: POINT REDONE ({} POINTS)", poly.points.len());
-                return;
-            }
+        if let Some(poly) = &mut self.draft_polygon
+            && poly.redo_point().is_some()
+        {
+            self.status = format!("PEN TOOL: POINT REDONE ({} POINTS)", poly.points.len());
+            return;
         }
 
         self.editing_label = None;
@@ -1114,11 +1173,11 @@ impl AnnotatorApp {
     }
 
     pub fn can_undo(&self) -> bool {
-        self.draft_polygon.as_ref().map_or(false, |p| p.can_undo()) || self.history.can_undo()
+        self.draft_polygon.as_ref().is_some_and(|p| p.can_undo()) || self.history.can_undo()
     }
 
     pub fn can_redo(&self) -> bool {
-        self.draft_polygon.as_ref().map_or(false, |p| p.can_redo()) || self.history.can_redo()
+        self.draft_polygon.as_ref().is_some_and(|p| p.can_redo()) || self.history.can_redo()
     }
 
     pub fn clear_history(&mut self) {
@@ -1214,9 +1273,7 @@ impl AnnotatorApp {
                     std::fs::read_to_string(sidecar_path)
                         .ok()
                         .and_then(|content| serde_json::from_str::<ProjectFile>(&content).ok())
-                        .map(|project| {
-                            (project.annotations, project.description, project.next_id)
-                        })
+                        .map(|project| (project.annotations, project.description, project.next_id))
                         .unwrap_or_else(|| (Vec::new(), None, 1))
                 };
 
@@ -1378,7 +1435,11 @@ impl AnnotatorApp {
         for image_path in &self.image_files {
             let (width, height, annotations) = if let Some(current_img) = &self.image {
                 if current_img.path == *image_path {
-                    (current_img.width, current_img.height, self.annotations.clone())
+                    (
+                        current_img.width,
+                        current_img.height,
+                        self.annotations.clone(),
+                    )
                 } else if let Some((cached_annos, _, _)) = self.annotations_cache.get(image_path) {
                     let (w, h) = if let Some(img) = self.image_cache.get(image_path) {
                         (img.width, img.height)
@@ -1392,7 +1453,8 @@ impl AnnotatorApp {
                         if let Ok(proj) = serde_json::from_str::<ProjectFile>(&content) {
                             (proj.image_width, proj.image_height, proj.annotations)
                         } else {
-                            let (w, h) = image::image_dimensions(image_path).unwrap_or((1920, 1080));
+                            let (w, h) =
+                                image::image_dimensions(image_path).unwrap_or((1920, 1080));
                             (w, h, Vec::new())
                         }
                     } else {
@@ -1457,7 +1519,88 @@ impl AnnotatorApp {
             .and_then(|json| std::fs::write(path, json).map_err(|e| e.to_string()))
         {
             Ok(()) => self.status = format!("DATASET EXPORTED  •  {}", path.display()),
-        Err(e) => self.status = format!("DATASET EXPORT FAILED: {e}"),
+            Err(e) => self.status = format!("DATASET EXPORT FAILED: {e}"),
+        }
+    }
+
+    pub fn crop_and_export_selected(&mut self) {
+        let Some(image) = &self.image else {
+            self.status = "OPEN AN IMAGE BEFORE CROPPING".into();
+            return;
+        };
+
+        if self.selected.is_empty() {
+            self.status = "NO REGIONS SELECTED TO CROP".into();
+            return;
+        }
+
+        let img_path = &image.path;
+        let decoded = match image::open(img_path) {
+            Ok(img) => img,
+            Err(err) => {
+                self.status = format!("COULD NOT LOAD IMAGE FOR CROPPING: {err}");
+                return;
+            }
+        };
+
+        if self.selected.len() == 1 {
+            let anno_id = *self.selected.iter().next().unwrap();
+            let Some(anno) = self.annotations.iter().find(|a| a.id == anno_id) else {
+                return;
+            };
+
+            let safe_label = sanitize_filename(&anno.label);
+            let default_name = format!("{safe_label}_{:02}_crop.png", anno.id);
+
+            if let Some(save_path) = rfd::FileDialog::new()
+                .set_file_name(default_name)
+                .add_filter("PNG Image (*.png)", &["png"])
+                .add_filter("JPEG Image (*.jpg)", &["jpg", "jpeg"])
+                .save_file()
+            {
+                if let Some(cropped) = crop_annotation_to_rgba(&decoded, anno) {
+                    match cropped.save(&save_path) {
+                        Ok(()) => {
+                            self.status = format!(
+                                "CROPPED & EXPORTED REGION {:02}  •  {}",
+                                anno.id,
+                                save_path.display()
+                            );
+                        }
+                        Err(e) => {
+                            self.status = format!("FAILED TO SAVE CROP: {e}");
+                        }
+                    }
+                } else {
+                    self.status = "REGION HAS ZERO SIZE (CANNOT CROP)".into();
+                }
+            }
+        } else {
+            // Multi-selection: export all selected crops to a chosen directory
+            if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                let stem = img_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("image");
+
+                let mut exported_count = 0;
+                for &anno_id in &self.selected {
+                    if let Some(anno) = self.annotations.iter().find(|a| a.id == anno_id) {
+                        let safe_label = sanitize_filename(&anno.label);
+                        let filename = format!("{stem}_{safe_label}_{:02}_crop.png", anno.id);
+                        let target_path = folder.join(filename);
+                        if let Some(cropped) = crop_annotation_to_rgba(&decoded, anno)
+                            && cropped.save(&target_path).is_ok()
+                        {
+                            exported_count += 1;
+                        }
+                    }
+                }
+                self.status = format!(
+                    "CROPPED & EXPORTED {exported_count} REGIONS TO {}",
+                    folder.display()
+                );
+            }
         }
     }
 
@@ -1485,9 +1628,11 @@ impl AnnotatorApp {
                 .filter(|a| self.selected.contains(&a.id) && !a.locked)
                 .count();
 
-            self.annotations
-                .retain(|annotation| !(self.selected.contains(&annotation.id) && !annotation.locked));
-            self.selected.retain(|id| self.annotations.iter().any(|a| a.id == *id));
+            self.annotations.retain(|annotation| {
+                !(self.selected.contains(&annotation.id) && !annotation.locked)
+            });
+            self.selected
+                .retain(|id| self.annotations.iter().any(|a| a.id == *id));
             update_hierarchy(&mut self.annotations);
             self.editing_label = None;
             self.active_drag = None;
@@ -1500,17 +1645,38 @@ impl AnnotatorApp {
     }
 
     pub fn shortcuts_and_drops(&mut self, ctx: &egui::Context) {
-        let (open_img, open_folder, open_proj, save_proj, export_json, export_dataset, undo, redo, delete, prev_img, next_img, escape, select_all, deselect, toggle_lock, enter, dropped) = ctx.input(|input| {
+        let (
+            open_img,
+            open_folder,
+            open_proj,
+            save_proj,
+            export_json,
+            export_dataset,
+            crop_export,
+            undo,
+            redo,
+            delete,
+            prev_img,
+            next_img,
+            escape,
+            select_all,
+            deselect,
+            toggle_lock,
+            enter,
+            dropped,
+        ) = ctx.input(|input| {
             let cmd_or_ctrl = input.modifiers.command || input.modifiers.ctrl;
             let shift = input.modifiers.shift;
             let alt = input.modifiers.alt;
             (
                 cmd_or_ctrl && !shift && !alt && input.key_pressed(Key::O),
-                cmd_or_ctrl && (alt && input.key_pressed(Key::O) || shift && input.key_pressed(Key::F)),
+                cmd_or_ctrl
+                    && (alt && input.key_pressed(Key::O) || shift && input.key_pressed(Key::F)),
                 cmd_or_ctrl && shift && input.key_pressed(Key::O),
                 cmd_or_ctrl && input.key_pressed(Key::S),
                 cmd_or_ctrl && !shift && input.key_pressed(Key::E),
                 cmd_or_ctrl && shift && input.key_pressed(Key::E),
+                cmd_or_ctrl && shift && input.key_pressed(Key::C),
                 cmd_or_ctrl && !shift && input.key_pressed(Key::Z),
                 (cmd_or_ctrl && shift && input.key_pressed(Key::Z))
                     || (cmd_or_ctrl && input.key_pressed(Key::Y)),
@@ -1546,6 +1712,9 @@ impl AnnotatorApp {
         if export_dataset {
             self.export_unified_dataset_dialog();
         }
+        if crop_export {
+            self.crop_and_export_selected();
+        }
         if undo {
             self.undo();
         }
@@ -1578,12 +1747,21 @@ impl AnnotatorApp {
                     (Key::Num9, 8),
                 ]
                 .into_iter()
-                .find_map(|(k, idx)| if input.key_pressed(k) { Some(idx) } else { None })
+                .find_map(|(k, idx)| {
+                    if input.key_pressed(k) {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                })
             }
         });
 
         let (tool_select, tool_rect, tool_poly) = ctx.input(|input| {
-            let no_mod = !input.modifiers.command && !input.modifiers.ctrl && !input.modifiers.shift && !input.modifiers.alt;
+            let no_mod = !input.modifiers.command
+                && !input.modifiers.ctrl
+                && !input.modifiers.shift
+                && !input.modifiers.alt;
             (
                 no_mod && input.key_pressed(Key::V),
                 no_mod && input.key_pressed(Key::B),
@@ -1592,12 +1770,16 @@ impl AnnotatorApp {
         });
 
         let convert_to_poly = ctx.input(|input| {
-            let shift_only = !input.modifiers.command && !input.modifiers.ctrl && !input.modifiers.alt && input.modifiers.shift;
+            let shift_only = !input.modifiers.command
+                && !input.modifiers.ctrl
+                && !input.modifiers.alt
+                && input.modifiers.shift;
             shift_only && input.key_pressed(Key::P)
         });
 
         let (arrow_left, arrow_right, arrow_up, arrow_down, arrow_shift) = ctx.input(|input| {
-            let no_cmd_ctrl_alt = !input.modifiers.command && !input.modifiers.ctrl && !input.modifiers.alt;
+            let no_cmd_ctrl_alt =
+                !input.modifiers.command && !input.modifiers.ctrl && !input.modifiers.alt;
             (
                 no_cmd_ctrl_alt && input.key_pressed(Key::ArrowLeft),
                 no_cmd_ctrl_alt && input.key_pressed(Key::ArrowRight),
@@ -1624,9 +1806,17 @@ impl AnnotatorApp {
                 nudge_y += step;
             }
 
-            if (nudge_x != 0.0 || nudge_y != 0.0) && !self.selected.is_empty() && self.editing_label.is_none() && self.autocomplete_nav.is_none() {
+            if (nudge_x != 0.0 || nudge_y != 0.0)
+                && !self.selected.is_empty()
+                && self.editing_label.is_none()
+                && self.autocomplete_nav.is_none()
+            {
                 self.nudge_selected(nudge_x, nudge_y);
-            } else if convert_to_poly && !self.selected.is_empty() && self.editing_label.is_none() && self.autocomplete_nav.is_none() {
+            } else if convert_to_poly
+                && !self.selected.is_empty()
+                && self.editing_label.is_none()
+                && self.autocomplete_nav.is_none()
+            {
                 self.convert_selected_to_polygon();
             } else if let Some(idx) = digit_preset {
                 self.apply_preset(idx);
@@ -1651,12 +1841,21 @@ impl AnnotatorApp {
                 self.marquee = None;
                 self.active_drag = None;
                 self.status = "POLYGON TOOL (CLICK TO PLACE POINTS, 3+ TO CLOSE)".to_string();
-            } else if enter && self.draft_polygon.as_ref().map_or(false, |p| p.points.len() >= 3) {
+            } else if enter
+                && self
+                    .draft_polygon
+                    .as_ref()
+                    .is_some_and(|p| p.points.len() >= 3)
+            {
                 ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                 self.finish_draft_polygon();
             } else if enter && self.selected.len() == 1 {
                 let id = *self.selected.iter().next().unwrap();
-                let is_locked = self.annotations.iter().find(|a| a.id == id).map_or(false, |a| a.locked);
+                let is_locked = self
+                    .annotations
+                    .iter()
+                    .find(|a| a.id == id)
+                    .is_some_and(|a| a.locked);
                 if !is_locked {
                     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                     self.history.begin_edit(self.current_snapshot());
@@ -1670,7 +1869,8 @@ impl AnnotatorApp {
                         self.draft_polygon = None;
                         self.status = "PEN TOOL DRAWING CANCELED".to_string();
                     } else {
-                        self.status = format!("PEN TOOL: POINT REMOVED ({} REMAINING)", poly.points.len());
+                        self.status =
+                            format!("PEN TOOL: POINT REMOVED ({} REMAINING)", poly.points.len());
                     }
                 } else if self.selected_vertex.is_some() {
                     self.delete_selected_vertex();
@@ -1722,7 +1922,7 @@ impl eframe::App for AnnotatorApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{match_class_presets, next_category_label, BatchProjectFile};
+    use crate::models::{BatchProjectFile, match_class_presets, next_category_label};
     use eframe::egui::Pos2;
     use std::path::PathBuf;
 
@@ -1953,10 +2153,7 @@ mod tests {
     fn test_switch_activates_uncached_image_without_blocking_for_decode() {
         let ctx = egui::Context::default();
         let mut app = test_app();
-        app.image_files = vec![
-            PathBuf::from("frame_01.png"),
-            PathBuf::from("frame_02.png"),
-        ];
+        app.image_files = vec![PathBuf::from("frame_01.png"), PathBuf::from("frame_02.png")];
         app.current_image_idx = Some(0);
 
         app.switch_to_image_index(&ctx, 1);
@@ -2034,14 +2231,10 @@ mod tests {
         let path2 = PathBuf::from("frame_02.png");
         app.dataset_folder = Some(PathBuf::from("/dataset"));
         app.image_files = vec![path1.clone(), path2.clone()];
-        app.annotations_cache.insert(
-            path1,
-            (vec![sample_annotation(1)], Some("car".into()), 2),
-        );
-        app.annotations_cache.insert(
-            path2,
-            (vec![sample_annotation(2)], None, 3),
-        );
+        app.annotations_cache
+            .insert(path1, (vec![sample_annotation(1)], Some("car".into()), 2));
+        app.annotations_cache
+            .insert(path2, (vec![sample_annotation(2)], None, 3));
 
         let temp_dir = std::env::temp_dir();
         let export_path = temp_dir.join("anno_test_unified_export.json");
@@ -2070,10 +2263,8 @@ mod tests {
         app.dataset_folder = Some(dataset_folder);
         app.image_files = vec![path1.clone(), path2.clone()];
         app.current_image_idx = Some(1);
-        app.annotations_cache.insert(
-            path1,
-            (vec![sample_annotation(1)], Some("first".into()), 2),
-        );
+        app.annotations_cache
+            .insert(path1, (vec![sample_annotation(1)], Some("first".into()), 2));
         app.annotations_cache
             .insert(path2, (vec![sample_annotation(4)], None, 5));
 
@@ -2132,9 +2323,15 @@ mod tests {
         }
 
         assert_eq!(restored.current_image_idx, Some(1));
-        assert_eq!(restored.image.as_ref().map(|image| &image.path), Some(&path2));
+        assert_eq!(
+            restored.image.as_ref().map(|image| &image.path),
+            Some(&path2)
+        );
         assert_eq!(restored.annotations[0].id, 4);
-        assert_eq!(restored.project_description.as_deref(), Some("active frame"));
+        assert_eq!(
+            restored.project_description.as_deref(),
+            Some("active frame")
+        );
         assert_eq!(restored.next_id, 5);
 
         std::fs::remove_dir_all(dataset_folder).unwrap();
@@ -2151,7 +2348,11 @@ mod tests {
         app.selected.insert(2);
 
         // Batch label update
-        for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id)) {
+        for a in app
+            .annotations
+            .iter_mut()
+            .filter(|a| app.selected.contains(&a.id))
+        {
             a.label = "vehicle".into();
         }
 
@@ -2161,7 +2362,11 @@ mod tests {
 
         // Batch color update
         let new_color = [0, 230, 118];
-        for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id)) {
+        for a in app
+            .annotations
+            .iter_mut()
+            .filter(|a| app.selected.contains(&a.id))
+        {
             a.color = new_color;
         }
 
@@ -2232,7 +2437,11 @@ mod tests {
     #[test]
     fn test_apply_preset_to_selected_annotations() {
         let mut app = test_app();
-        app.annotations = vec![sample_annotation(1), sample_annotation(2), sample_annotation(3)];
+        app.annotations = vec![
+            sample_annotation(1),
+            sample_annotation(2),
+            sample_annotation(3),
+        ];
 
         // Select annotation 1 and 2
         app.selected.insert(1);
@@ -2319,7 +2528,11 @@ mod tests {
         if let Some(idx) = app.autocomplete_nav {
             let (_, preset) = suggestions[idx];
             app.annotations[0].color = preset.color;
-            app.annotations[0].label = next_category_label(&preset.prefix, &app.annotations, Some(app.annotations[0].id));
+            app.annotations[0].label = next_category_label(
+                &preset.prefix,
+                &app.annotations,
+                Some(app.annotations[0].id),
+            );
             app.autocomplete_nav = None;
         }
 
@@ -2340,7 +2553,11 @@ mod tests {
         assert_eq!(id, 1);
 
         // Simulate Enter shortcut behavior
-        let is_locked = app.annotations.iter().find(|a| a.id == id).map_or(false, |a| a.locked);
+        let is_locked = app
+            .annotations
+            .iter()
+            .find(|a| a.id == id)
+            .is_some_and(|a| a.locked);
         assert!(!is_locked);
         app.history.begin_edit(app.current_snapshot());
         app.editing_label = Some(id);
@@ -2836,5 +3053,69 @@ mod tests {
         app.selected_vertex = Some((1, 0));
         assert!(app.delete_selected_vertex());
         assert_eq!(app.annotations[0].points.as_ref().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_sanitize_filename() {
+        assert_eq!(
+            super::sanitize_filename("car 01 / front!"),
+            "car_01___front"
+        );
+        assert_eq!(super::sanitize_filename("___"), "region");
+        assert_eq!(super::sanitize_filename("person-leg_02"), "person-leg_02");
+    }
+
+    #[test]
+    fn test_crop_annotation_rectangle() {
+        // Create 100x100 white image
+        let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            100,
+            100,
+            image::Rgba([255, 0, 0, 255]),
+        ));
+
+        let mut anno = sample_annotation(1);
+        anno.x = 10.0;
+        anno.y = 20.0;
+        anno.width = 30.0;
+        anno.height = 40.0;
+        anno.points = None;
+
+        let cropped =
+            super::crop_annotation_to_rgba(&img, &anno).expect("Should crop successfully");
+        assert_eq!(cropped.width(), 30);
+        assert_eq!(cropped.height(), 40);
+        assert_eq!(cropped.get_pixel(0, 0), &image::Rgba([255, 0, 0, 255]));
+    }
+
+    #[test]
+    fn test_crop_annotation_polygon_alpha_mask() {
+        // Create 100x100 solid image
+        let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            100,
+            100,
+            image::Rgba([0, 255, 0, 255]),
+        ));
+
+        let mut anno = sample_annotation(1);
+        anno.x = 0.0;
+        anno.y = 0.0;
+        anno.width = 50.0;
+        anno.height = 50.0;
+        // Triangle from (0,0) to (50,0) to (0,50)
+        anno.points = Some(vec![[0.0, 0.0], [50.0, 0.0], [0.0, 50.0]]);
+
+        let cropped =
+            super::crop_annotation_to_rgba(&img, &anno).expect("Should crop triangle polygon");
+        assert_eq!(cropped.width(), 50);
+        assert_eq!(cropped.height(), 50);
+
+        // (5, 5) is inside the triangle -> alpha should be 255
+        let inside = cropped.get_pixel(5, 5);
+        assert_eq!(inside[3], 255);
+
+        // (45, 45) is outside the triangle -> alpha should be 0 (transparent)
+        let outside = cropped.get_pixel(45, 45);
+        assert_eq!(outside[3], 0);
     }
 }
