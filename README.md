@@ -19,6 +19,7 @@ Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` /
 - **Folder Scanning**: Automatically detects all `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, and `.tiff` files sorted with natural alphanumeric ordering (`img1`, `img2`, `img10`).
 - **Interactive Filmstrip**: Browse image pills in the bottom bar with live status indicators and annotation badges (`[3]`).
 - **Seamless Auto-Saving**: Automatically saves each image's progress to a `<image_stem>.anno` sidecar file when navigating between images.
+- **Batch Projects**: Save and reopen the full dataset state as one `.annobatch` file with `Cmd/Ctrl+S`.
 - **Fast Navigation**: Move swiftly through the batch using `A` / `D` or `[` / `]`.
 
 ## Controls
@@ -27,7 +28,7 @@ Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` /
 - `Cmd/Ctrl+Option+O` / `Cmd+Shift+F` — open folder dataset
 - `A` / `[` — previous image in dataset
 - `D` / `]` — next image in dataset
-- `Cmd/Ctrl+S` — save project (.anno)
+- `Cmd/Ctrl+S` — save a single-image `.anno` project or multi-image `.annobatch`
 - `Cmd/Ctrl+E` — export current image JSON
 - `Cmd/Ctrl+Shift+E` — export unified dataset JSON
 - `Cmd/Ctrl+Z` — undo

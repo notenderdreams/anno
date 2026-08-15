@@ -9,8 +9,8 @@ use crate::geometry::update_hierarchy;
 use crate::history::{AppSnapshot, History};
 use crate::menubar::{handle_native_menu_events, NativeMenuBar};
 use crate::models::{
-    export_annotation_tree, ActiveDrag, Annotation, AnnotationFile, Draft, LoadedImage, ProjectFile,
-    UnifiedDatasetExport, UnifiedImageExport,
+    export_annotation_tree, ActiveDrag, Annotation, AnnotationFile, BatchProjectFile, Draft,
+    LoadedImage, ProjectFile, UnifiedDatasetExport, UnifiedImageExport,
 };
 use crate::sidebar_left::render_left_sidebar;
 use crate::sidebar_right::render_right_sidebar;
@@ -144,11 +144,24 @@ impl AnnotatorApp {
 
     pub fn open_project_dialog(&mut self, ctx: &egui::Context) {
         if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Anno Batch (*.annobatch)", &["annobatch"])
             .add_filter("Anno Project (*.anno)", &["anno"])
             .add_filter("JSON File (*.json)", &["json"])
             .pick_file()
         {
-            self.load_project(ctx, &path);
+            self.load_saved_file(ctx, &path);
+        }
+    }
+
+    pub fn load_saved_file(&mut self, ctx: &egui::Context, path: &Path) {
+        let is_batch = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("annobatch"));
+        if is_batch {
+            self.load_batch(ctx, path);
+        } else {
+            self.load_project(ctx, path);
         }
     }
 
@@ -431,6 +444,101 @@ impl AnnotatorApp {
         }
     }
 
+    pub fn load_batch(&mut self, ctx: &egui::Context, path: &Path) {
+        let content = match std::fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(error) => {
+                self.status = format!("COULD NOT READ BATCH: {error}");
+                return;
+            }
+        };
+
+        let batch: BatchProjectFile = match serde_json::from_str(&content) {
+            Ok(batch) => batch,
+            Err(error) => {
+                self.status = format!("INVALID ANNO BATCH: {error}");
+                return;
+            }
+        };
+
+        if batch.format != "annobatch" {
+            self.status = "INVALID ANNO BATCH FORMAT".into();
+            return;
+        }
+
+        if batch.format_version != 1 {
+            self.status = format!(
+                "UNSUPPORTED ANNO BATCH VERSION: {}",
+                batch.format_version
+            );
+            return;
+        }
+
+        if batch.images.is_empty() {
+            self.status = "ANNO BATCH CONTAINS NO IMAGES".into();
+            return;
+        }
+
+        self.auto_save_current_image();
+        self.thumbnail_cache.clear();
+        self.image_cache.clear();
+        self.annotations_cache.clear();
+        self.annotation_counts.clear();
+        self.image_files.clear();
+        self.loader.clear();
+
+        let saved_dataset_folder = batch.dataset_folder.as_deref().map(PathBuf::from);
+        let batch_parent = path.parent().unwrap_or_else(|| Path::new("."));
+
+        for project in &batch.images {
+            let raw_path = PathBuf::from(&project.image);
+            let image_path = if raw_path.exists() {
+                raw_path
+            } else if let Some(folder) = &saved_dataset_folder {
+                let candidate = folder.join(&raw_path);
+                if candidate.exists() {
+                    candidate
+                } else {
+                    batch_parent.join(&raw_path)
+                }
+            } else {
+                batch_parent.join(&raw_path)
+            };
+
+            self.image_files.push(image_path.clone());
+            self.annotation_counts
+                .insert(image_path.clone(), project.annotations.len());
+            let max_id = project
+                .annotations
+                .iter()
+                .map(|annotation| annotation.id)
+                .max()
+                .unwrap_or(0);
+            self.annotations_cache.insert(
+                image_path,
+                (
+                    project.annotations.clone(),
+                    project.description.clone(),
+                    project.next_id.max(max_id + 1),
+                ),
+            );
+        }
+
+        self.dataset_folder = self
+            .image_files
+            .first()
+            .and_then(|image_path| image_path.parent())
+            .map(Path::to_path_buf);
+        self.current_image_idx = None;
+        let initial_idx = batch.current_image_idx.min(self.image_files.len() - 1);
+        self.switch_to_image_index(ctx, initial_idx);
+        self.status = format!(
+            "BATCH LOADED  •  {}  •  {} IMAGES",
+            path.display(),
+            self.image_files.len()
+        );
+    }
+
     pub fn current_snapshot(&self) -> AppSnapshot {
         AppSnapshot {
             annotations: self.annotations.clone(),
@@ -482,6 +590,11 @@ impl AnnotatorApp {
     }
 
     pub fn save_project_dialog(&mut self) {
+        if self.image_files.len() > 1 {
+            self.save_batch_dialog();
+            return;
+        }
+
         let Some(image) = &self.image else {
             self.status = "OPEN AN IMAGE BEFORE SAVING PROJECT".into();
             return;
@@ -500,6 +613,120 @@ impl AnnotatorApp {
             .save_file()
         {
             self.save_project_to(&path);
+        }
+    }
+
+    pub fn save_batch_dialog(&mut self) {
+        if self.image_files.is_empty() {
+            self.status = "OPEN A DATASET BEFORE SAVING BATCH".into();
+            return;
+        }
+
+        let dataset_name = self
+            .dataset_folder
+            .as_ref()
+            .and_then(|folder| folder.file_name())
+            .and_then(|name| name.to_str())
+            .unwrap_or("dataset");
+        let default_name = format!("{dataset_name}.annobatch");
+
+        if let Some(path) = rfd::FileDialog::new()
+            .set_file_name(default_name)
+            .add_filter("Anno Batch (*.annobatch)", &["annobatch"])
+            .save_file()
+        {
+            self.save_batch_to(&path);
+        }
+    }
+
+    pub fn save_batch_to(&mut self, path: &Path) {
+        if self.image_files.is_empty() {
+            return;
+        }
+
+        self.auto_save_current_image();
+        let dataset_name = self
+            .dataset_folder
+            .as_ref()
+            .and_then(|folder| folder.file_name())
+            .and_then(|name| name.to_str())
+            .unwrap_or("dataset")
+            .to_string();
+
+        let images = self
+            .image_files
+            .iter()
+            .map(|image_path| {
+                let (annotations, description, next_id) = if self
+                    .image
+                    .as_ref()
+                    .is_some_and(|image| image.path == *image_path)
+                {
+                    (
+                        self.annotations.clone(),
+                        self.project_description.clone(),
+                        self.next_id,
+                    )
+                } else if let Some(cached) = self.annotations_cache.get(image_path) {
+                    cached.clone()
+                } else {
+                    let sidecar_path = image_path.with_extension("anno");
+                    std::fs::read_to_string(sidecar_path)
+                        .ok()
+                        .and_then(|content| serde_json::from_str::<ProjectFile>(&content).ok())
+                        .map(|project| {
+                            (project.annotations, project.description, project.next_id)
+                        })
+                        .unwrap_or_else(|| (Vec::new(), None, 1))
+                };
+
+                let (image_width, image_height) = self
+                    .image_cache
+                    .get(image_path)
+                    .map(|image| (image.width, image.height))
+                    .or_else(|| {
+                        self.image.as_ref().and_then(|image| {
+                            (image.path == *image_path).then_some((image.width, image.height))
+                        })
+                    })
+                    .unwrap_or_else(|| image::image_dimensions(image_path).unwrap_or((0, 0)));
+                let stored_path = self
+                    .dataset_folder
+                    .as_ref()
+                    .and_then(|folder| image_path.strip_prefix(folder).ok())
+                    .unwrap_or(image_path)
+                    .to_string_lossy()
+                    .into_owned();
+
+                ProjectFile {
+                    image: stored_path,
+                    image_width,
+                    image_height,
+                    description,
+                    next_id,
+                    annotations,
+                }
+            })
+            .collect();
+
+        let batch = BatchProjectFile {
+            format: "annobatch".into(),
+            format_version: 1,
+            dataset_name,
+            dataset_folder: self
+                .dataset_folder
+                .as_ref()
+                .map(|folder| folder.to_string_lossy().into_owned()),
+            current_image_idx: self.current_image_idx.unwrap_or(0),
+            images,
+        };
+
+        match serde_json::to_string_pretty(&batch)
+            .map_err(|error| error.to_string())
+            .and_then(|json| std::fs::write(path, json).map_err(|error| error.to_string()))
+        {
+            Ok(()) => self.status = format!("BATCH SAVED  •  {}", path.display()),
+            Err(error) => self.status = format!("BATCH SAVE FAILED: {error}"),
         }
     }
 
@@ -772,8 +999,11 @@ impl AnnotatorApp {
         if let Some(path) = dropped.into_iter().find_map(|file| file.path) {
             if path.is_dir() {
                 self.load_folder(ctx, path);
-            } else if path.extension().and_then(|ext| ext.to_str()) == Some("anno") {
-                self.load_project(ctx, &path);
+            } else if matches!(
+                path.extension().and_then(|ext| ext.to_str()),
+                Some("anno" | "annobatch")
+            ) {
+                self.load_saved_file(ctx, &path);
             } else {
                 self.load_image(ctx, path);
             }
@@ -982,5 +1212,76 @@ mod tests {
         assert_eq!(val["images"][1]["annotations"][0]["id"], 2);
 
         let _ = std::fs::remove_file(export_path);
+    }
+
+    #[test]
+    fn test_save_batch_uses_editable_annobatch_format() {
+        let mut app = test_app();
+        let dataset_folder = PathBuf::from("/dataset/camera_frames");
+        let path1 = dataset_folder.join("frame_01.png");
+        let path2 = dataset_folder.join("frame_02.png");
+        app.dataset_folder = Some(dataset_folder);
+        app.image_files = vec![path1.clone(), path2.clone()];
+        app.current_image_idx = Some(1);
+        app.annotations_cache.insert(
+            path1,
+            (vec![sample_annotation(1)], Some("first".into()), 2),
+        );
+        app.annotations_cache
+            .insert(path2, (vec![sample_annotation(4)], None, 5));
+
+        let save_path = std::env::temp_dir().join("anno_test_batch.annobatch");
+        app.save_batch_to(&save_path);
+
+        let content = std::fs::read_to_string(&save_path).unwrap();
+        let batch: BatchProjectFile = serde_json::from_str(&content).unwrap();
+        assert_eq!(batch.format, "annobatch");
+        assert_eq!(batch.format_version, 1);
+        assert_eq!(batch.dataset_name, "camera_frames");
+        assert_eq!(batch.current_image_idx, 1);
+        assert_eq!(batch.images.len(), 2);
+        assert_eq!(batch.images[0].image, "frame_01.png");
+        assert_eq!(batch.images[0].description.as_deref(), Some("first"));
+        assert_eq!(batch.images[0].annotations[0].id, 1);
+        assert_eq!(batch.images[1].next_id, 5);
+
+        let _ = std::fs::remove_file(save_path);
+    }
+
+    #[test]
+    fn test_annobatch_round_trip_restores_current_image_and_annotations() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dataset_folder = std::env::temp_dir().join(format!("anno_batch_{unique}"));
+        std::fs::create_dir_all(&dataset_folder).unwrap();
+        let path1 = dataset_folder.join("frame_01.png");
+        let path2 = dataset_folder.join("frame_02.png");
+        image::RgbaImage::new(2, 2).save(&path1).unwrap();
+        image::RgbaImage::new(3, 2).save(&path2).unwrap();
+
+        let mut source = test_app();
+        source.dataset_folder = Some(dataset_folder.clone());
+        source.image_files = vec![path1, path2.clone()];
+        source.current_image_idx = Some(1);
+        source.annotations_cache.insert(
+            path2.clone(),
+            (vec![sample_annotation(4)], Some("active frame".into()), 5),
+        );
+        let batch_path = dataset_folder.join("camera_frames.annobatch");
+        source.save_batch_to(&batch_path);
+
+        let ctx = egui::Context::default();
+        let mut restored = test_app();
+        restored.load_batch(&ctx, &batch_path);
+
+        assert_eq!(restored.current_image_idx, Some(1));
+        assert_eq!(restored.image.as_ref().map(|image| &image.path), Some(&path2));
+        assert_eq!(restored.annotations[0].id, 4);
+        assert_eq!(restored.project_description.as_deref(), Some("active frame"));
+        assert_eq!(restored.next_id, 5);
+
+        std::fs::remove_dir_all(dataset_folder).unwrap();
     }
 }

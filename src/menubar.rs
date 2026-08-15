@@ -66,7 +66,7 @@ impl NativeMenuBar {
         );
         let open_project = MenuItem::with_id(
             "open_project",
-            "Open Project (.anno)...",
+            "Open Project or Batch...",
             true,
             Some(Accelerator::new(
                 Some(Modifiers::SUPER | Modifiers::SHIFT),
@@ -75,7 +75,7 @@ impl NativeMenuBar {
         );
         let save_project = MenuItem::with_id(
             "save_project",
-            "Save Project (.anno)...",
+            "Save Project or Batch...",
             false,
             Some(Accelerator::new(Some(Modifiers::SUPER), Code::KeyS)),
         );

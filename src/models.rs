@@ -61,6 +61,18 @@ pub struct ProjectFile {
     pub annotations: Vec<Annotation>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BatchProjectFile {
+    pub format: String,
+    pub format_version: u32,
+    pub dataset_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dataset_folder: Option<String>,
+    #[serde(default)]
+    pub current_image_idx: usize,
+    pub images: Vec<ProjectFile>,
+}
+
 fn default_next_id() -> u32 {
     1
 }
