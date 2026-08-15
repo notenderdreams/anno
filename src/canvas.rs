@@ -270,12 +270,12 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
             if response.secondary_clicked() {
                 if let Some(poly) = &mut app.draft_polygon {
-                    poly.points.pop();
+                    poly.undo_point();
                     if poly.points.is_empty() {
                         app.draft_polygon = None;
-                        app.status = "POLYGON DRAWING CANCELED".into();
+                        app.status = "PEN TOOL DRAWING CANCELED".into();
                     } else {
-                        app.status = format!("POINT REMOVED ({} REMAINING)", poly.points.len());
+                        app.status = format!("PEN TOOL: POINT REMOVED ({} REMAINING)", poly.points.len());
                     }
                 }
             }
@@ -610,9 +610,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                 } else {
                                     app.selected.clear();
                                     app.editing_label = None;
-                                    app.draft_polygon = Some(DraftPolygon {
-                                        points: vec![img_pos],
-                                    });
+                                    app.draft_polygon = Some(DraftPolygon::new(img_pos));
                                     app.status = "PEN TOOL: 1 POINT PLACED  •  CLICK TO ADD MORE (RETURN TO START TO CLOSE)".into();
                                 }
                             } else if let Some(poly) = &mut app.draft_polygon {
@@ -620,7 +618,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                 if poly.points.len() >= 3 && start_screen.distance(pointer) <= 16.0 {
                                     app.finish_draft_polygon();
                                 } else {
-                                    poly.points.push(img_pos);
+                                    poly.add_point(img_pos);
                                     app.status = format!(
                                         "PEN TOOL: {} POINTS PLACED  •  CLICK START POINT OR PRESS ENTER TO CLOSE",
                                         poly.points.len()

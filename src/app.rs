@@ -795,6 +795,18 @@ impl AnnotatorApp {
     }
 
     pub fn undo(&mut self) {
+        if let Some(poly) = &mut self.draft_polygon {
+            if poly.undo_point().is_some() {
+                if poly.points.is_empty() {
+                    self.draft_polygon = None;
+                    self.status = "PEN TOOL DRAWING CANCELED".into();
+                } else {
+                    self.status = format!("PEN TOOL: POINT UNDONE ({} REMAINING)", poly.points.len());
+                }
+                return;
+            }
+        }
+
         self.editing_label = None;
         self.draft_polygon = None;
         self.draft = None;
@@ -809,6 +821,13 @@ impl AnnotatorApp {
     }
 
     pub fn redo(&mut self) {
+        if let Some(poly) = &mut self.draft_polygon {
+            if poly.redo_point().is_some() {
+                self.status = format!("PEN TOOL: POINT REDONE ({} POINTS)", poly.points.len());
+                return;
+            }
+        }
+
         self.editing_label = None;
         self.draft_polygon = None;
         self.draft = None;
@@ -823,11 +842,11 @@ impl AnnotatorApp {
     }
 
     pub fn can_undo(&self) -> bool {
-        self.history.can_undo()
+        self.draft_polygon.as_ref().map_or(false, |p| p.can_undo()) || self.history.can_undo()
     }
 
     pub fn can_redo(&self) -> bool {
-        self.history.can_redo()
+        self.draft_polygon.as_ref().map_or(false, |p| p.can_redo()) || self.history.can_redo()
     }
 
     pub fn clear_history(&mut self) {
@@ -1321,12 +1340,12 @@ impl AnnotatorApp {
                 }
             } else if delete {
                 if let Some(poly) = &mut self.draft_polygon {
-                    poly.points.pop();
+                    poly.undo_point();
                     if poly.points.is_empty() {
                         self.draft_polygon = None;
-                        self.status = "POLYGON DRAWING CANCELED".to_string();
+                        self.status = "PEN TOOL DRAWING CANCELED".to_string();
                     } else {
-                        self.status = format!("POINT REMOVED ({} REMAINING)", poly.points.len());
+                        self.status = format!("PEN TOOL: POINT REMOVED ({} REMAINING)", poly.points.len());
                     }
                 } else {
                     self.delete_selected();
@@ -2021,14 +2040,12 @@ mod tests {
     #[test]
     fn test_finish_draft_polygon() {
         let mut app = test_app();
-        app.draft_polygon = Some(DraftPolygon {
-            points: vec![
-                Pos2::new(10.0, 10.0),
-                Pos2::new(40.0, 10.0),
-                Pos2::new(40.0, 50.0),
-                Pos2::new(10.0, 50.0),
-            ],
-        });
+        app.draft_polygon = Some(DraftPolygon::from_points(vec![
+            Pos2::new(10.0, 10.0),
+            Pos2::new(40.0, 10.0),
+            Pos2::new(40.0, 50.0),
+            Pos2::new(10.0, 50.0),
+        ]));
 
         let success = app.finish_draft_polygon();
         assert!(success);
@@ -2048,9 +2065,10 @@ mod tests {
     #[test]
     fn test_finish_draft_polygon_requires_minimum_3_points() {
         let mut app = test_app();
-        app.draft_polygon = Some(DraftPolygon {
-            points: vec![Pos2::new(10.0, 10.0), Pos2::new(40.0, 10.0)],
-        });
+        app.draft_polygon = Some(DraftPolygon::from_points(vec![
+            Pos2::new(10.0, 10.0),
+            Pos2::new(40.0, 10.0),
+        ]));
 
         // 2 points is not a polygon region
         let success = app.finish_draft_polygon();
@@ -2067,18 +2085,62 @@ mod tests {
         app.tool_mode = ToolMode::Polygon;
         assert_eq!(app.tool_mode, ToolMode::Polygon);
 
-        app.draft_polygon = Some(DraftPolygon {
-            points: vec![Pos2::new(5.0, 5.0), Pos2::new(15.0, 5.0)],
-        });
+        app.draft_polygon = Some(DraftPolygon::from_points(vec![
+            Pos2::new(5.0, 5.0),
+            Pos2::new(15.0, 5.0),
+        ]));
 
-        // Pop last point (simulating Backspace)
-        if let Some(poly) = &mut app.draft_polygon {
-            poly.points.pop();
-        }
+        // Undo point (simulating Backspace or Cmd+Z)
+        app.undo();
         assert_eq!(app.draft_polygon.as_ref().unwrap().points.len(), 1);
+
+        // Redo point (simulating Cmd+Shift+Z / Cmd+Y)
+        app.redo();
+        assert_eq!(app.draft_polygon.as_ref().unwrap().points.len(), 2);
 
         // Cancel (simulating Escape)
         app.draft_polygon = None;
+        assert!(app.draft_polygon.is_none());
+    }
+
+    #[test]
+    fn test_polygon_draft_step_by_step_undo_redo() {
+        let mut app = test_app();
+        app.tool_mode = ToolMode::Polygon;
+
+        // User clicks 3 points
+        let mut draft = DraftPolygon::new(Pos2::new(10.0, 10.0));
+        draft.add_point(Pos2::new(50.0, 10.0));
+        draft.add_point(Pos2::new(50.0, 60.0));
+        app.draft_polygon = Some(draft);
+
+        assert_eq!(app.draft_polygon.as_ref().unwrap().points.len(), 3);
+        assert!(app.can_undo());
+
+        // 1. Undo 3rd point
+        app.undo();
+        assert_eq!(app.draft_polygon.as_ref().unwrap().points.len(), 2);
+        assert!(app.can_undo());
+        assert!(app.can_redo());
+
+        // 2. Undo 2nd point
+        app.undo();
+        assert_eq!(app.draft_polygon.as_ref().unwrap().points.len(), 1);
+        assert!(app.can_undo());
+        assert!(app.can_redo());
+
+        // 3. Redo 2nd point
+        app.redo();
+        assert_eq!(app.draft_polygon.as_ref().unwrap().points.len(), 2);
+
+        // 4. Redo 3rd point
+        app.redo();
+        assert_eq!(app.draft_polygon.as_ref().unwrap().points.len(), 3);
+
+        // 5. Undo all points to cancel
+        app.undo(); // 2 points
+        app.undo(); // 1 point
+        app.undo(); // 0 points -> draft cancelled
         assert!(app.draft_polygon.is_none());
     }
 
@@ -2088,13 +2150,11 @@ mod tests {
         assert_eq!(app.annotations.len(), 0);
         assert!(!app.can_undo());
 
-        app.draft_polygon = Some(DraftPolygon {
-            points: vec![
-                Pos2::new(10.0, 10.0),
-                Pos2::new(40.0, 10.0),
-                Pos2::new(40.0, 50.0),
-            ],
-        });
+        app.draft_polygon = Some(DraftPolygon::from_points(vec![
+            Pos2::new(10.0, 10.0),
+            Pos2::new(40.0, 10.0),
+            Pos2::new(40.0, 50.0),
+        ]));
 
         assert!(app.finish_draft_polygon());
         assert_eq!(app.annotations.len(), 1);

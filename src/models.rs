@@ -324,9 +324,51 @@ pub struct Draft {
     pub current: Pos2,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct DraftPolygon {
     pub points: Vec<Pos2>,
+    pub undone_points: Vec<Pos2>,
+}
+
+impl DraftPolygon {
+    pub fn new(first_point: Pos2) -> Self {
+        Self {
+            points: vec![first_point],
+            undone_points: Vec::new(),
+        }
+    }
+
+    pub fn from_points(points: Vec<Pos2>) -> Self {
+        Self {
+            points,
+            undone_points: Vec::new(),
+        }
+    }
+
+    pub fn add_point(&mut self, point: Pos2) {
+        self.points.push(point);
+        self.undone_points.clear();
+    }
+
+    pub fn undo_point(&mut self) -> Option<Pos2> {
+        let pt = self.points.pop()?;
+        self.undone_points.push(pt);
+        Some(pt)
+    }
+
+    pub fn redo_point(&mut self) -> Option<Pos2> {
+        let pt = self.undone_points.pop()?;
+        self.points.push(pt);
+        Some(pt)
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.points.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.undone_points.is_empty()
+    }
 }
 
 #[cfg(test)]
