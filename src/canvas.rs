@@ -181,10 +181,11 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         }
                         if !cursor_set {
                             let over_tag = app.annotations.iter().any(|a| {
-                                annotation_tag_rect(a, image_rect, image_size).contains(pointer)
+                                !a.locked && annotation_tag_rect(a, image_rect, image_size).contains(pointer)
                             });
                             let over_selected_body = app.annotations.iter().any(|a| {
-                                app.selected.contains(&a.id)
+                                !a.locked
+                                    && app.selected.contains(&a.id)
                                     && annotation_screen_rect(a, image_rect, image_size).contains(pointer)
                             });
 
@@ -216,9 +217,9 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     let shift_held = ctx.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
                     let mut handled = false;
 
-                    // 1. Check resize handle on selected annotations
+                    // 1. Check resize handle on selected UNLOCKED annotations
                     for &selected_id in &app.selected {
-                        if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id) {
+                        if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
                             let rect = annotation_screen_rect(annotation, image_rect, image_size);
                             if let Some(handle) = hit_resize_handle(rect, pointer) {
                                 app.history.begin_edit(app.current_snapshot());
@@ -264,15 +265,17 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             let initial_positions: Vec<(u32, f32, f32)> = app
                                 .annotations
                                 .iter()
-                                .filter(|a| app.selected.contains(&a.id))
+                                .filter(|a| app.selected.contains(&a.id) && !a.locked)
                                 .map(|a| (a.id, a.x, a.y))
                                 .collect();
 
-                            app.history.begin_edit(app.current_snapshot());
-                            app.active_drag = Some(ActiveDrag::Move {
-                                initial_positions,
-                                start_pointer: pointer,
-                            });
+                            if !initial_positions.is_empty() {
+                                app.history.begin_edit(app.current_snapshot());
+                                app.active_drag = Some(ActiveDrag::Move {
+                                    initial_positions,
+                                    start_pointer: pointer,
+                                });
+                            }
                             handled = true;
                         }
                     }
@@ -418,6 +421,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             height: (max.y - min.y).round(),
                             color: [255, 0, 0],
                             parent_id: None,
+                            locked: false,
                         });
 
                         app.select_single(id);
@@ -475,6 +479,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     &annotation.label,
                     annotation.color32(),
                     selected_ids.contains(&annotation.id),
+                    annotation.locked,
                 );
 
                 if is_editing {
@@ -516,6 +521,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     "NEW REGION",
                     RED,
                     true,
+                    false,
                 );
             }
 
@@ -574,6 +580,7 @@ mod tests {
             height,
             color: [255, 0, 0],
             parent_id: None,
+            locked: false,
         }
     }
 

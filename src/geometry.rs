@@ -32,7 +32,8 @@ pub fn annotation_tag_rect(annotation: &Annotation, image_rect: Rect, image_size
     } else {
         &annotation.label
     };
-    let width = (label.len() as f32 * 6.5 + 10.0).max(35.0);
+    let extra = if annotation.locked { 18.0 } else { 0.0 };
+    let width = (label.len() as f32 * 6.5 + 10.0 + extra).max(35.0);
     let height = 16.0;
     let tag_rect = Rect::from_min_size(Pos2::new(rect.left(), rect.top() - height), Vec2::new(width, height));
     if tag_rect.top() < image_rect.top() {

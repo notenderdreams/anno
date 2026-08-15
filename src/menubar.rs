@@ -16,6 +16,7 @@ pub struct NativeMenuBar {
     pub undo: MenuItem,
     pub redo: MenuItem,
     pub select_all: MenuItem,
+    pub toggle_lock: MenuItem,
     pub delete_region: MenuItem,
     pub deselect: MenuItem,
     pub prev_image: MenuItem,
@@ -129,6 +130,12 @@ impl NativeMenuBar {
             false,
             Some(Accelerator::new(Some(Modifiers::SUPER), Code::KeyA)),
         );
+        let toggle_lock = MenuItem::with_id(
+            "toggle_lock",
+            "Lock / Unlock Layer",
+            false,
+            Some(Accelerator::new(Some(Modifiers::SUPER), Code::KeyL)),
+        );
         let delete_region = MenuItem::with_id(
             "delete_region",
             "Delete Selected",
@@ -151,6 +158,7 @@ impl NativeMenuBar {
             &PredefinedMenuItem::copy(None),
             &PredefinedMenuItem::paste(None),
             &select_all,
+            &toggle_lock,
             &PredefinedMenuItem::separator(),
             &delete_region,
             &deselect,
@@ -221,6 +229,7 @@ impl NativeMenuBar {
             undo,
             redo,
             select_all,
+            toggle_lock,
             delete_region,
             deselect,
             prev_image,
@@ -256,6 +265,7 @@ impl NativeMenuBar {
         let _ = self.redo.set_enabled(can_redo);
 
         let _ = self.select_all.set_enabled(has_annotations);
+        let _ = self.toggle_lock.set_enabled(has_selection);
         let _ = self.delete_region.set_enabled(has_selection);
         let _ = self.deselect.set_enabled(has_selection);
     }
@@ -291,6 +301,7 @@ pub fn handle_native_menu_events(app: &mut AnnotatorApp, ctx: &egui::Context) {
             "undo" => app.undo(),
             "redo" => app.redo(),
             "select_all" => app.select_all(),
+            "toggle_lock" => app.toggle_lock_selected(),
             "prev_image" => app.previous_image(ctx),
             "next_image" => app.next_image(ctx),
             "delete_region" => app.delete_selected(),

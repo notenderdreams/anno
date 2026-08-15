@@ -1,5 +1,6 @@
 use eframe::egui::{self, Color32, FontFamily, FontId, Margin, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use crate::app::AnnotatorApp;
+use crate::render::draw_lucide_lock;
 use crate::theme::{MUTED, PANEL, RED};
 
 pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
@@ -128,11 +129,11 @@ fn render_tree_branch(
     ancestors_is_last: &[bool],
     is_last_sibling: bool,
 ) {
-    let (label, color32, is_selected) = {
+    let (label, color32, is_selected, is_locked) = {
         let Some(a) = app.annotations.iter().find(|a| a.id == annotation_id) else {
             return;
         };
-        (a.label.clone(), a.color32(), app.is_selected(annotation_id))
+        (a.label.clone(), a.color32(), app.is_selected(annotation_id), a.locked)
     };
 
     let children_ids: Vec<u32> = app
@@ -164,6 +165,8 @@ fn render_tree_branch(
 
     let indent_step = 14.0_f32;
     let line_color = Color32::from_gray(65);
+
+    let mut lock_clicked = false;
 
     if ui.is_rect_visible(row_rect) {
         ui.painter().rect_filled(row_rect, 2.0, bg_color);
@@ -268,6 +271,8 @@ fn render_tree_branch(
 
         let text_color = if is_selected {
             Color32::WHITE
+        } else if is_locked {
+            Color32::from_gray(150)
         } else {
             Color32::from_gray(190)
         };
@@ -287,11 +292,40 @@ fn render_tree_branch(
             FontId::monospace(9.0),
             Color32::from_gray(100),
         );
+
+        let lock_center = Pos2::new(row_rect.right() - 36.0, row_rect.center().y);
+        let lock_rect = Rect::from_center_size(lock_center, Vec2::splat(18.0));
+        let lock_response = ui.allocate_rect(lock_rect, Sense::click());
+        if lock_response.clicked() {
+            lock_clicked = true;
+        }
+
+        if is_locked {
+            draw_lucide_lock(
+                ui.painter(),
+                lock_center,
+                11.0,
+                true,
+                Color32::from_rgb(255, 179, 0),
+                1.3,
+            );
+        } else if response.hovered() || lock_response.hovered() {
+            draw_lucide_lock(
+                ui.painter(),
+                lock_center,
+                11.0,
+                false,
+                Color32::from_gray(110),
+                1.3,
+            );
+        }
     }
 
     ui.advance_cursor_after_rect(row_rect);
 
-    if response.clicked() {
+    if lock_clicked {
+        app.toggle_lock_annotation(annotation_id);
+    } else if response.clicked() {
         let modifier = ui.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
         if modifier {
             app.toggle_select(annotation_id);

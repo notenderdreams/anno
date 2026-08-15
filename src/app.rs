@@ -131,6 +131,42 @@ impl AnnotatorApp {
         self.editing_label = None;
     }
 
+    pub fn toggle_lock_annotation(&mut self, id: u32) {
+        if let Some(annotation) = self.annotations.iter().find(|a| a.id == id) {
+            let new_locked = !annotation.locked;
+            self.history.record(self.current_snapshot());
+            if let Some(a) = self.annotations.iter_mut().find(|a| a.id == id) {
+                a.locked = new_locked;
+            }
+            let state = if new_locked { "LOCKED" } else { "UNLOCKED" };
+            self.status = format!("REGION {:02} {}", id, state);
+        }
+    }
+
+    pub fn toggle_lock_selected(&mut self) {
+        if self.selected.is_empty() {
+            return;
+        }
+        self.history.record(self.current_snapshot());
+        let all_locked = self
+            .annotations
+            .iter()
+            .filter(|a| self.selected.contains(&a.id))
+            .all(|a| a.locked);
+        let new_state = !all_locked;
+
+        for annotation in self
+            .annotations
+            .iter_mut()
+            .filter(|a| self.selected.contains(&a.id))
+        {
+            annotation.locked = new_state;
+        }
+
+        let action_str = if new_state { "LOCKED" } else { "UNLOCKED" };
+        self.status = format!("{} REGION(S) {}", self.selected.len(), action_str);
+    }
+
     pub fn request_thumbnail(&mut self, path: &Path) {
         if !self.thumbnail_cache.contains_key(path) {
             self.loader.request_thumbnail(path);
@@ -1040,7 +1076,7 @@ impl AnnotatorApp {
             .and_then(|json| std::fs::write(path, json).map_err(|e| e.to_string()))
         {
             Ok(()) => self.status = format!("DATASET EXPORTED  •  {}", path.display()),
-            Err(e) => self.status = format!("DATASET EXPORT FAILED: {e}"),
+        Err(e) => self.status = format!("DATASET EXPORT FAILED: {e}"),
         }
     }
 
@@ -1050,10 +1086,27 @@ impl AnnotatorApp {
 
     pub fn delete_selected(&mut self) {
         if !self.selected.is_empty() {
+            let locked_count = self
+                .annotations
+                .iter()
+                .filter(|a| self.selected.contains(&a.id) && a.locked)
+                .count();
+
+            if locked_count == self.selected.len() {
+                self.status = "LOCKED REGION(S) CANNOT BE DELETED".into();
+                return;
+            }
+
             self.history.record(self.current_snapshot());
-            let count = self.selected.len();
-            self.annotations.retain(|annotation| !self.selected.contains(&annotation.id));
-            self.selected.clear();
+            let count = self
+                .annotations
+                .iter()
+                .filter(|a| self.selected.contains(&a.id) && !a.locked)
+                .count();
+
+            self.annotations
+                .retain(|annotation| !(self.selected.contains(&annotation.id) && !annotation.locked));
+            self.selected.retain(|id| self.annotations.iter().any(|a| a.id == *id));
             update_hierarchy(&mut self.annotations);
             self.editing_label = None;
             self.active_drag = None;
@@ -1066,7 +1119,7 @@ impl AnnotatorApp {
     }
 
     pub fn shortcuts_and_drops(&mut self, ctx: &egui::Context) {
-        let (open_img, open_folder, open_proj, save_proj, export_json, export_dataset, undo, redo, delete, prev_img, next_img, escape, select_all, deselect, dropped) = ctx.input(|input| {
+        let (open_img, open_folder, open_proj, save_proj, export_json, export_dataset, undo, redo, delete, prev_img, next_img, escape, select_all, deselect, toggle_lock, dropped) = ctx.input(|input| {
             let cmd_or_ctrl = input.modifiers.command || input.modifiers.ctrl;
             let shift = input.modifiers.shift;
             let alt = input.modifiers.alt;
@@ -1088,6 +1141,7 @@ impl AnnotatorApp {
                 input.key_pressed(Key::Escape),
                 cmd_or_ctrl && !shift && !alt && input.key_pressed(Key::A),
                 cmd_or_ctrl && !shift && !alt && input.key_pressed(Key::D),
+                cmd_or_ctrl && !shift && !alt && input.key_pressed(Key::L),
                 input.raw.dropped_files.clone(),
             )
         });
@@ -1121,6 +1175,8 @@ impl AnnotatorApp {
                 self.select_all();
             } else if deselect {
                 self.deselect_all();
+            } else if toggle_lock {
+                self.toggle_lock_selected();
             } else if prev_img {
                 self.previous_image(ctx);
             } else if next_img {
@@ -1164,10 +1220,13 @@ impl eframe::App for AnnotatorApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::BatchProjectFile;
+    use std::path::PathBuf;
 
     fn test_app() -> AnnotatorApp {
         AnnotatorApp {
             image: None,
+            image_files: Vec::new(),
             annotations: Vec::new(),
             selected: HashSet::new(),
             editing_label: None,
@@ -1183,7 +1242,6 @@ mod tests {
             project_description: None,
             history: History::new(),
             dataset_folder: None,
-            image_files: Vec::new(),
             current_image_idx: None,
             pending_image_idx: None,
             auto_save_dataset: true,
@@ -1206,6 +1264,7 @@ mod tests {
             height: 50.0,
             color: [255, 0, 0],
             parent_id: None,
+            locked: false,
         }
     }
 
@@ -1598,5 +1657,46 @@ mod tests {
         assert_eq!(app.annotations[0].color, new_color);
         assert_eq!(app.annotations[1].color, new_color);
         assert_eq!(app.annotations[2].color, [255, 0, 0]);
+    }
+
+    #[test]
+    fn test_toggle_lock_selected() {
+        let mut app = test_app();
+        app.annotations.push(sample_annotation(1));
+        app.annotations.push(sample_annotation(2));
+
+        app.selected.insert(1);
+        assert!(!app.annotations[0].locked);
+
+        // Toggle lock on selected
+        app.toggle_lock_selected();
+        assert!(app.annotations[0].locked);
+        assert!(!app.annotations[1].locked);
+
+        // Toggle again to unlock
+        app.toggle_lock_selected();
+        assert!(!app.annotations[0].locked);
+    }
+
+    #[test]
+    fn test_locked_annotation_delete_protection() {
+        let mut app = test_app();
+        let mut a1 = sample_annotation(1);
+        a1.locked = true;
+        let a2 = sample_annotation(2);
+        app.annotations = vec![a1, a2];
+
+        // Try deleting locked annotation 1
+        app.selected.insert(1);
+        app.delete_selected();
+        assert_eq!(app.annotations.len(), 2);
+        assert!(app.status.contains("LOCKED"));
+
+        // Delete unlocked annotation 2
+        app.selected.clear();
+        app.selected.insert(2);
+        app.delete_selected();
+        assert_eq!(app.annotations.len(), 1);
+        assert_eq!(app.annotations[0].id, 1);
     }
 }

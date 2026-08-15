@@ -1,6 +1,7 @@
-use eframe::egui::{self, Color32, FontFamily, FontId, Margin, RichText, Stroke, Vec2};
+use eframe::egui::{self, Color32, FontFamily, FontId, Margin, Pos2, RichText, Sense, Stroke, Vec2};
 use crate::app::AnnotatorApp;
 use crate::geometry::update_hierarchy;
+use crate::render::draw_lucide_lock;
 use crate::theme::{MUTED, PANEL, RED};
 
 pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
@@ -33,11 +34,40 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 let mut bounds_changed = false;
 
                 if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == selected_id) {
-                    ui.label(
-                        RichText::new(format!("REGION {:02}", annotation.id))
-                            .size(9.0)
-                            .color(RED),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!("REGION {:02}", annotation.id))
+                                .size(9.0)
+                                .color(RED),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let (lock_label, lock_color) = if annotation.locked {
+                                ("LOCKED", Color32::from_rgb(255, 179, 0))
+                            } else {
+                                ("UNLOCKED", MUTED)
+                            };
+                            let btn_size = Vec2::new(76.0, 20.0);
+                            let (btn_rect, btn_response) = ui.allocate_exact_size(btn_size, Sense::click());
+                            if ui.is_rect_visible(btn_rect) {
+                                let bg = if btn_response.hovered() { Color32::from_gray(32) } else { Color32::from_gray(22) };
+                                ui.painter().rect_filled(btn_rect, 2.0, bg);
+                                ui.painter().rect_stroke(btn_rect, 2.0, Stroke::new(1.0_f32, Color32::from_gray(50)));
+                                let icon_center = Pos2::new(btn_rect.left() + 11.0, btn_rect.center().y);
+                                draw_lucide_lock(ui.painter(), icon_center, 10.0, annotation.locked, lock_color, 1.2);
+                                ui.painter().text(
+                                    Pos2::new(btn_rect.left() + 20.0, btn_rect.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    lock_label,
+                                    FontId::monospace(9.0),
+                                    lock_color,
+                                );
+                            }
+                            if btn_response.clicked() {
+                                annotation.locked = !annotation.locked;
+                                edit_committed = true;
+                            }
+                        });
+                    });
                     ui.add_space(8.0);
                     ui.label(RichText::new("LABEL").size(9.0).color(MUTED));
 
@@ -177,40 +207,48 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     ui.label(RichText::new("BOUNDS (PX)").size(9.0).color(MUTED));
                     ui.add_space(4.0);
 
+                    let is_locked = annotation.locked;
                     let max_x = (img_w - annotation.width).max(0.0);
                     let max_y = (img_h - annotation.height).max(0.0);
                     let max_w = (img_w - annotation.x).max(8.0);
                     let max_h = (img_h - annotation.y).max(8.0);
 
-                    egui::Grid::new("right_bounds_grid")
-                        .num_columns(2)
-                        .spacing([12.0, 6.0])
-                        .show(ui, |ui| {
-                            let (x_ch, x_start, x_stop) = bound_field(ui, "X", &mut annotation.x, 0.0, max_x);
-                            let (y_ch, y_start, y_stop) = bound_field(ui, "Y", &mut annotation.y, 0.0, max_y);
-                            ui.end_row();
-                            let (w_ch, w_start, w_stop) = bound_field(ui, "W", &mut annotation.width, 8.0, max_w);
-                            let (h_ch, h_start, h_stop) = bound_field(ui, "H", &mut annotation.height, 8.0, max_h);
-                            ui.end_row();
+                    ui.add_enabled_ui(!is_locked, |ui| {
+                        egui::Grid::new("right_bounds_grid")
+                            .num_columns(2)
+                            .spacing([12.0, 6.0])
+                            .show(ui, |ui| {
+                                let (x_ch, x_start, x_stop) = bound_field(ui, "X", &mut annotation.x, 0.0, max_x);
+                                let (y_ch, y_start, y_stop) = bound_field(ui, "Y", &mut annotation.y, 0.0, max_y);
+                                ui.end_row();
+                                let (w_ch, w_start, w_stop) = bound_field(ui, "W", &mut annotation.width, 8.0, max_w);
+                                let (h_ch, h_start, h_stop) = bound_field(ui, "H", &mut annotation.height, 8.0, max_h);
+                                ui.end_row();
 
-                            if x_ch || y_ch || w_ch || h_ch {
-                                bounds_changed = true;
-                            }
-                            if x_start || y_start || w_start || h_start {
-                                edit_started = true;
-                            }
-                            if x_stop || y_stop || w_stop || h_stop {
-                                edit_committed = true;
-                            }
-                        });
+                                if x_ch || y_ch || w_ch || h_ch {
+                                    bounds_changed = true;
+                                }
+                                if x_start || y_start || w_start || h_start {
+                                    edit_started = true;
+                                }
+                                if x_stop || y_stop || w_stop || h_stop {
+                                    edit_committed = true;
+                                }
+                            });
+                    });
 
                     ui.add_space(16.0);
-                    should_delete = ui
-                        .add_sized(
-                            [ui.available_width(), 30.0],
-                            egui::Button::new(RichText::new("DELETE REGION").size(10.0).color(RED)),
-                        )
-                        .clicked();
+                    ui.add_enabled_ui(!is_locked, |ui| {
+                        if ui
+                            .add_sized(
+                                [ui.available_width(), 30.0],
+                                egui::Button::new(RichText::new("DELETE REGION").size(10.0).color(RED)),
+                            )
+                            .clicked()
+                        {
+                            should_delete = true;
+                        }
+                    });
                 }
 
                 if bounds_changed {
@@ -239,12 +277,45 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 let mut should_delete = false;
                 let count = app.selected.len();
 
-                ui.label(
-                    RichText::new(format!("{count} REGIONS SELECTED"))
-                        .size(9.0)
-                        .strong()
-                        .color(RED),
-                );
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("{count} REGIONS SELECTED"))
+                            .size(9.0)
+                            .strong()
+                            .color(RED),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let all_locked = app
+                            .annotations
+                            .iter()
+                            .filter(|a| app.selected.contains(&a.id))
+                            .all(|a| a.locked);
+                        let (lock_label, lock_color) = if all_locked {
+                            ("UNLOCK ALL", Color32::WHITE)
+                        } else {
+                            ("LOCK ALL", Color32::from_rgb(255, 179, 0))
+                        };
+                        let btn_size = Vec2::new(84.0, 20.0);
+                        let (btn_rect, btn_response) = ui.allocate_exact_size(btn_size, Sense::click());
+                        if ui.is_rect_visible(btn_rect) {
+                            let bg = if btn_response.hovered() { Color32::from_gray(32) } else { Color32::from_gray(22) };
+                            ui.painter().rect_filled(btn_rect, 2.0, bg);
+                            ui.painter().rect_stroke(btn_rect, 2.0, Stroke::new(1.0_f32, Color32::from_gray(50)));
+                            let icon_center = Pos2::new(btn_rect.left() + 11.0, btn_rect.center().y);
+                            draw_lucide_lock(ui.painter(), icon_center, 10.0, !all_locked, lock_color, 1.2);
+                            ui.painter().text(
+                                Pos2::new(btn_rect.left() + 20.0, btn_rect.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                lock_label,
+                                FontId::monospace(9.0),
+                                lock_color,
+                            );
+                        }
+                        if btn_response.clicked() {
+                            app.toggle_lock_selected();
+                        }
+                    });
+                });
                 ui.add_space(8.0);
                 ui.label(RichText::new("SET LABEL (ALL)").size(9.0).color(MUTED));
 

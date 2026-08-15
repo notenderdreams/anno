@@ -146,6 +146,7 @@ mod tests {
             height: 50.0,
             color: [255, 0, 0],
             parent_id: None,
+            locked: false,
         }
     }
 

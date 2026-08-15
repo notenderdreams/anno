@@ -39,6 +39,8 @@ pub struct Annotation {
     pub color: [u8; 3],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<u32>,
+    #[serde(default)]
+    pub locked: bool,
 }
 
 impl Annotation {
@@ -173,6 +175,7 @@ mod tests {
             height: 80.0,
             color: [255, 0, 0],
             parent_id,
+            locked: false,
         }
     }
 
