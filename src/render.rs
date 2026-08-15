@@ -129,7 +129,9 @@ pub fn draw_polygon_annotation(
     box_color: Color32,
     selected: bool,
     locked: bool,
+    selected_vertex: Option<usize>,
     hovered_vertex: Option<usize>,
+    edge_insert_hint: Option<Pos2>,
 ) {
     if screen_points.len() < 2 {
         return;
@@ -164,14 +166,38 @@ pub fn draw_polygon_annotation(
         );
     }
 
+    // Edge insertion preview handle (when hovering near an edge in Select mode)
+    if let Some(hint_pos) = edge_insert_hint {
+        painter.circle_filled(hint_pos, 4.5, Color32::from_rgba_unmultiplied(255, 255, 255, 230));
+        painter.circle_stroke(hint_pos, 4.5, Stroke::new(1.2_f32, color));
+        painter.line_segment([Pos2::new(hint_pos.x - 2.5, hint_pos.y), Pos2::new(hint_pos.x + 2.5, hint_pos.y)], Stroke::new(1.2_f32, color));
+        painter.line_segment([Pos2::new(hint_pos.x, hint_pos.y - 2.5), Pos2::new(hint_pos.x, hint_pos.y + 2.5)], Stroke::new(1.2_f32, color));
+    }
+
     // Vertex handles (interactive when selected and unlocked)
-    let dot_radius = if selected { 4.0_f32 } else { 2.2_f32 };
     for (i, &pt) in screen_points.iter().enumerate() {
-        let is_hovered = selected && !locked && hovered_vertex == Some(i);
-        let r = if is_hovered { dot_radius + 2.0 } else { dot_radius };
-        painter.circle_filled(pt, r, if is_hovered { Color32::WHITE } else { color });
         if selected && !locked {
-            painter.circle_stroke(pt, r + 1.0, Stroke::new(1.0_f32, if is_hovered { color } else { Color32::WHITE }));
+            let is_selected_v = selected_vertex == Some(i);
+            let is_hovered_v = hovered_vertex == Some(i);
+
+            if is_selected_v {
+                // High-visibility active selected vertex with accent ring and central core
+                painter.circle_stroke(pt, 7.0, Stroke::new(2.0_f32, Color32::from_rgb(255, 220, 0)));
+                painter.circle_filled(pt, 5.0, Color32::WHITE);
+                painter.circle_filled(pt, 2.5, color);
+            } else if is_hovered_v {
+                // Interactive hover state: crisp white body + colored outline
+                painter.circle_filled(pt, 5.5, Color32::WHITE);
+                painter.circle_stroke(pt, 6.5, Stroke::new(1.5_f32, color));
+                painter.circle_filled(pt, 2.5, color);
+            } else {
+                // Default selected vertex handle
+                painter.circle_filled(pt, 4.0, color);
+                painter.circle_stroke(pt, 4.5, Stroke::new(1.0_f32, Color32::WHITE));
+            }
+        } else {
+            // Unselected polygon vertex dot
+            painter.circle_filled(pt, 2.2, color);
         }
     }
 

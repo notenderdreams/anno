@@ -145,17 +145,27 @@ pub fn hit_polygon_vertex(
     best_idx
 }
 
-pub fn hit_polygon_edge(
+pub fn project_onto_segment(p: Pos2, a: Pos2, b: Pos2) -> Pos2 {
+    let ab = b - a;
+    let len_sq = ab.length_sq();
+    if len_sq == 0.0 {
+        return a;
+    }
+    let t = ((p - a).dot(ab) / len_sq).clamp(0.0, 1.0);
+    a + ab * t
+}
+
+pub fn hit_polygon_edge_with_projection(
     points: &[[f32; 2]],
     image_rect: Rect,
     image_size: Vec2,
     pointer: Pos2,
     threshold: f32,
-) -> Option<usize> {
+) -> Option<(usize, Pos2)> {
     if points.len() < 2 {
         return None;
     }
-    let mut best_edge = None;
+    let mut best = None;
     let mut best_dist = threshold;
     let n = points.len();
     for i in 0..n {
@@ -165,10 +175,21 @@ pub fn hit_polygon_edge(
         let d = distance_to_segment(pointer, p1, p2);
         if d <= best_dist {
             best_dist = d;
-            best_edge = Some(i);
+            let proj = project_onto_segment(pointer, p1, p2);
+            best = Some((i, proj));
         }
     }
-    best_edge
+    best
+}
+
+pub fn hit_polygon_edge(
+    points: &[[f32; 2]],
+    image_rect: Rect,
+    image_size: Vec2,
+    pointer: Pos2,
+    threshold: f32,
+) -> Option<usize> {
+    hit_polygon_edge_with_projection(points, image_rect, image_size, pointer, threshold).map(|(idx, _)| idx)
 }
 
 #[cfg(test)]
@@ -261,5 +282,18 @@ mod tests {
             hit_polygon_edge(&points, img_rect, img_size, Pos2::new(50.0, 50.0), 8.0),
             None
         );
+    }
+
+    #[test]
+    fn test_hit_polygon_edge_with_projection() {
+        let points = vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]];
+        let img_rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0));
+        let img_size = Vec2::new(100.0, 100.0);
+
+        let hit = hit_polygon_edge_with_projection(&points, img_rect, img_size, Pos2::new(50.0, 3.0), 8.0);
+        assert!(hit.is_some());
+        let (edge_idx, proj) = hit.unwrap();
+        assert_eq!(edge_idx, 0);
+        assert_eq!(proj, Pos2::new(50.0, 0.0));
     }
 }

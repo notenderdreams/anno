@@ -64,6 +64,7 @@ pub struct AnnotatorApp {
     pub presets: Vec<ClassPreset>,
     pub active_preset_idx: usize,
     pub autocomplete_nav: Option<usize>,
+    pub selected_vertex: Option<(u32, usize)>,
 }
 
 impl AnnotatorApp {
@@ -101,6 +102,7 @@ impl AnnotatorApp {
             presets: default_presets(),
             active_preset_idx: 0,
             autocomplete_nav: None,
+            selected_vertex: None,
         }
     }
 }
@@ -139,6 +141,7 @@ impl Default for AnnotatorApp {
             presets: default_presets(),
             active_preset_idx: 0,
             autocomplete_nav: None,
+            selected_vertex: None,
         }
     }
 }
@@ -223,6 +226,7 @@ impl AnnotatorApp {
     pub fn select_single(&mut self, id: u32) {
         self.selected.clear();
         self.selected.insert(id);
+        self.selected_vertex = None;
     }
 
     pub fn toggle_select(&mut self, id: u32) {
@@ -231,10 +235,12 @@ impl AnnotatorApp {
         } else {
             self.selected.insert(id);
         }
+        self.selected_vertex = None;
     }
 
     pub fn select_all(&mut self) {
         self.selected = self.annotations.iter().map(|a| a.id).collect();
+        self.selected_vertex = None;
         if self.selected.is_empty() {
             self.status = "NO REGIONS TO SELECT".into();
         } else {
@@ -244,12 +250,55 @@ impl AnnotatorApp {
 
     pub fn deselect_all(&mut self) {
         self.selected.clear();
+        self.selected_vertex = None;
         self.editing_label = None;
     }
 
     pub fn nudge_selected(&mut self, dx: f32, dy: f32) -> bool {
         if self.selected.is_empty() {
             return false;
+        }
+
+        // If a specific polygon vertex is selected, nudge just that vertex
+        if let Some((id, v_idx)) = self.selected_vertex {
+            if let Some(image) = &self.image {
+                let img_w = image.width as f32;
+                let img_h = image.height as f32;
+                let is_unlocked = self.annotations.iter().any(|a| a.id == id && !a.locked);
+                if is_unlocked {
+                    if let Some(anno) = self.annotations.iter().find(|a| a.id == id) {
+                        if let Some(pts) = &anno.points {
+                            if v_idx < pts.len() {
+                                let curr_x = pts[v_idx][0];
+                                let curr_y = pts[v_idx][1];
+                                let new_x = (curr_x + dx).clamp(0.0, img_w).round();
+                                let new_y = (curr_y + dy).clamp(0.0, img_h).round();
+                                if new_x == curr_x && new_y == curr_y {
+                                    return false;
+                                }
+                                self.history.record(self.current_snapshot());
+                                if let Some(anno) = self.annotations.iter_mut().find(|a| a.id == id) {
+                                    if let Some(pts) = &mut anno.points {
+                                        pts[v_idx] = [new_x, new_y];
+                                        let poly_pos: Vec<egui::Pos2> = pts.iter().map(|p| egui::Pos2::new(p[0], p[1])).collect();
+                                        let (bb_x, bb_y, bb_w, bb_h) = crate::geometry::polygon_bounding_box(&poly_pos);
+                                        anno.x = bb_x.round();
+                                        anno.y = bb_y.round();
+                                        anno.width = bb_w.round();
+                                        anno.height = bb_h.round();
+                                    }
+                                }
+                                update_hierarchy(&mut self.annotations);
+                                self.status = format!("VERTEX #{}: ({:.0}, {:.0})", v_idx + 1, new_x, new_y);
+                                return true;
+                            }
+                        }
+                    }
+                } else {
+                    self.status = "LOCKED REGION(S) CANNOT BE MOVED".into();
+                    return false;
+                }
+            }
         }
 
         let active_ids: Vec<u32> = self
@@ -319,6 +368,39 @@ impl AnnotatorApp {
             format!("{} REGIONS NUDGED", active_ids.len())
         };
         true
+    }
+
+    pub fn delete_selected_vertex(&mut self) -> bool {
+        if let Some((id, v_idx)) = self.selected_vertex {
+            if let Some(anno) = self.annotations.iter().find(|a| a.id == id && !a.locked) {
+                if let Some(pts) = &anno.points {
+                    if pts.len() > 3 {
+                        self.history.record(self.current_snapshot());
+                        if let Some(anno) = self.annotations.iter_mut().find(|a| a.id == id) {
+                            if let Some(pts) = &mut anno.points {
+                                if v_idx < pts.len() {
+                                    pts.remove(v_idx);
+                                    let poly_pos: Vec<egui::Pos2> = pts.iter().map(|p| egui::Pos2::new(p[0], p[1])).collect();
+                                    let (bb_x, bb_y, bb_w, bb_h) = crate::geometry::polygon_bounding_box(&poly_pos);
+                                    anno.x = bb_x.round();
+                                    anno.y = bb_y.round();
+                                    anno.width = bb_w.round();
+                                    anno.height = bb_h.round();
+                                    self.status = format!("POLYGON VERTEX REMOVED ({} REMAINING)", pts.len());
+                                }
+                            }
+                        }
+                        self.selected_vertex = None;
+                        update_hierarchy(&mut self.annotations);
+                        return true;
+                    } else {
+                        self.status = "POLYGON REQUIRES AT LEAST 3 VERTICES".into();
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     pub fn toggle_lock_annotation(&mut self, id: u32) {
@@ -1590,6 +1672,8 @@ impl AnnotatorApp {
                     } else {
                         self.status = format!("PEN TOOL: POINT REMOVED ({} REMAINING)", poly.points.len());
                     }
+                } else if self.selected_vertex.is_some() {
+                    self.delete_selected_vertex();
                 } else {
                     self.delete_selected();
                 }
@@ -1605,6 +1689,7 @@ impl AnnotatorApp {
             self.marquee = None;
             self.active_drag = None;
             self.editing_label = None;
+            self.selected_vertex = None;
             self.selected.clear();
         }
         if let Some(path) = dropped.into_iter().find_map(|file| file.path) {
@@ -1674,6 +1759,7 @@ mod tests {
             presets: default_presets(),
             active_preset_idx: 0,
             autocomplete_nav: None,
+            selected_vertex: None,
         }
     }
 
@@ -2691,5 +2777,64 @@ mod tests {
 
         assert!(!app.convert_selected_to_polygon());
         assert!(app.annotations[0].points.is_none());
+    }
+
+    #[test]
+    fn test_nudge_selected_vertex() {
+        let mut app = test_app();
+        let ctx = egui::Context::default();
+        let pixel = egui::ColorImage::new([1, 1], egui::Color32::WHITE);
+        app.image = Some(LoadedImage {
+            texture: ctx.load_texture("test_nudge_vertex", pixel, egui::TextureOptions::LINEAR),
+            width: 500,
+            height: 500,
+            path: PathBuf::from("/test.png"),
+        });
+        let mut anno = sample_annotation(1);
+        anno.points = Some(vec![[10.0, 10.0], [60.0, 10.0], [60.0, 60.0], [10.0, 60.0]]);
+        app.annotations.push(anno);
+        app.select_single(1);
+        app.selected_vertex = Some((1, 0)); // select top-left vertex [10, 10]
+
+        // Nudge just the top-left vertex by (5, 8)
+        assert!(app.nudge_selected(5.0, 8.0));
+        let pts = app.annotations[0].points.as_ref().unwrap();
+        assert_eq!(pts[0], [15.0, 18.0]);
+        // Other vertices remain untouched
+        assert_eq!(pts[1], [60.0, 10.0]);
+        assert_eq!(pts[2], [60.0, 60.0]);
+        assert_eq!(pts[3], [10.0, 60.0]);
+        // Bounding box recomputed properly
+        assert_eq!(app.annotations[0].x, 10.0);
+        assert_eq!(app.annotations[0].y, 10.0);
+        assert_eq!(app.annotations[0].width, 50.0);
+        assert_eq!(app.annotations[0].height, 50.0);
+
+        // Undo restores vertex position
+        app.undo();
+        let pts = app.annotations[0].points.as_ref().unwrap();
+        assert_eq!(pts[0], [10.0, 10.0]);
+    }
+
+    #[test]
+    fn test_delete_selected_vertex() {
+        let mut app = test_app();
+        let mut anno = sample_annotation(1);
+        anno.points = Some(vec![[10.0, 10.0], [60.0, 10.0], [60.0, 60.0], [10.0, 60.0]]);
+        app.annotations.push(anno);
+        app.select_single(1);
+        app.selected_vertex = Some((1, 1)); // [60, 10]
+
+        assert!(app.delete_selected_vertex());
+        let pts = app.annotations[0].points.as_ref().unwrap();
+        assert_eq!(pts.len(), 3);
+        assert_eq!(pts[0], [10.0, 10.0]);
+        assert_eq!(pts[1], [60.0, 60.0]);
+        assert_eq!(pts[2], [10.0, 60.0]);
+
+        // Attempting to delete when only 3 vertices are left is prevented
+        app.selected_vertex = Some((1, 0));
+        assert!(app.delete_selected_vertex());
+        assert_eq!(app.annotations[0].points.as_ref().unwrap().len(), 3);
     }
 }
