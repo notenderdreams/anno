@@ -1,5 +1,5 @@
 use eframe::egui::{
-    self, Align2, Color32, CursorIcon, FontId, Key, Margin, PointerButton, Pos2, Rect, Sense, Vec2,
+    self, Align2, Color32, CursorIcon, FontId, Key, Margin, PointerButton, Pos2, Rect, Sense, Stroke, Vec2,
 };
 
 use crate::app::AnnotatorApp;
@@ -32,6 +32,38 @@ fn hit_resize_handle(rect: Rect, pointer: Pos2) -> Option<ResizeHandle> {
     } else {
         None
     }
+}
+
+pub fn hit_annotation<'a>(
+    annotations: &'a [Annotation],
+    image_rect: Rect,
+    image_size: Vec2,
+    pointer: Pos2,
+) -> Option<&'a Annotation> {
+    // 1. Tags have absolute highest priority so inner annotations can always be selected
+    // even if their tag falls inside another annotation's bounding box.
+    if let Some(hit) = annotations
+        .iter()
+        .rev()
+        .find(|a| annotation_tag_rect(a, image_rect, image_size).contains(pointer))
+    {
+        return Some(hit);
+    }
+
+    // 2. If no tag hit, check bounding boxes, prioritizing innermost (smallest area) box.
+    annotations
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| annotation_screen_rect(a, image_rect, image_size).contains(pointer))
+        .min_by(|(idx_a, a), (idx_b, b)| {
+            let area_a = a.width * a.height;
+            let area_b = b.width * b.height;
+            area_a
+                .partial_cmp(&area_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| idx_b.cmp(idx_a))
+        })
+        .map(|(_, a)| a)
 }
 
 pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
@@ -130,7 +162,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 if let Some(pointer) = response.hover_pos() {
                     if image_rect.contains(pointer) {
                         let mut cursor_set = false;
-                        if let Some(selected_id) = app.selected {
+                        for &selected_id in &app.selected {
                             if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id) {
                                 let rect = annotation_screen_rect(annotation, image_rect, image_size);
                                 if let Some(handle) = hit_resize_handle(rect, pointer) {
@@ -143,14 +175,23 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                         }
                                     }
                                     cursor_set = true;
+                                    break;
                                 }
                             }
                         }
                         if !cursor_set {
-                            if app.annotations.iter().rev().any(|a| {
+                            let over_tag = app.annotations.iter().any(|a| {
                                 annotation_tag_rect(a, image_rect, image_size).contains(pointer)
-                            }) {
+                            });
+                            let over_selected_body = app.annotations.iter().any(|a| {
+                                app.selected.contains(&a.id)
+                                    && annotation_screen_rect(a, image_rect, image_size).contains(pointer)
+                            });
+
+                            if over_tag || over_selected_body {
                                 ctx.set_cursor_icon(CursorIcon::Move);
+                            } else {
+                                ctx.set_cursor_icon(CursorIcon::Crosshair);
                             }
                         }
                     }
@@ -159,13 +200,11 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
             if response.double_clicked() {
                 if let Some(pointer) = response.interact_pointer_pos() {
-                    if let Some(hit) = app.annotations.iter().rev().find(|annotation| {
-                        annotation_tag_rect(annotation, image_rect, image_size).contains(pointer)
-                            || annotation_screen_rect(annotation, image_rect, image_size).contains(pointer)
-                    }) {
+                    if let Some(hit) = hit_annotation(&app.annotations, image_rect, image_size, pointer) {
+                        let hit_id = hit.id;
                         app.history.begin_edit(app.current_snapshot());
-                        app.selected = Some(hit.id);
-                        app.editing_label = Some(hit.id);
+                        app.select_single(hit_id);
+                        app.editing_label = Some(hit_id);
                         app.request_label_focus = true;
                     }
                 }
@@ -174,8 +213,11 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     .interact_pointer_pos()
                     .filter(|point| image_rect.contains(*point))
                 {
+                    let shift_held = ctx.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
                     let mut handled = false;
-                    if let Some(selected_id) = app.selected {
+
+                    // 1. Check resize handle on selected annotations
+                    for &selected_id in &app.selected {
                         if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id) {
                             let rect = annotation_screen_rect(annotation, image_rect, image_size);
                             if let Some(handle) = hit_resize_handle(rect, pointer) {
@@ -190,31 +232,60 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     initial_h: annotation.height,
                                 });
                                 handled = true;
+                                break;
                             }
                         }
                     }
 
+                    // 2. Check hit on annotation tag or ALREADY SELECTED body to move
                     if !handled {
                         let hit_tag = app
                             .annotations
                             .iter()
                             .rev()
-                            .find(|annotation| {
-                                annotation_tag_rect(annotation, image_rect, image_size).contains(pointer)
-                            })
-                            .map(|a| (a.id, a.x, a.y));
+                            .find(|a| annotation_tag_rect(a, image_rect, image_size).contains(pointer));
 
-                        if let Some((id, x, y)) = hit_tag {
-                            app.selected = Some(id);
+                        let hit_selected_body = app
+                            .annotations
+                            .iter()
+                            .find(|a| {
+                                app.selected.contains(&a.id)
+                                    && annotation_screen_rect(a, image_rect, image_size).contains(pointer)
+                            });
+
+                        if let Some(hit) = hit_tag.or(hit_selected_body) {
+                            let id = hit.id;
+                            if shift_held {
+                                app.selected.insert(id);
+                            } else if !app.selected.contains(&id) {
+                                app.select_single(id);
+                            }
+
+                            let initial_positions: Vec<(u32, f32, f32)> = app
+                                .annotations
+                                .iter()
+                                .filter(|a| app.selected.contains(&a.id))
+                                .map(|a| (a.id, a.x, a.y))
+                                .collect();
+
                             app.history.begin_edit(app.current_snapshot());
                             app.active_drag = Some(ActiveDrag::Move {
-                                id,
+                                initial_positions,
                                 start_pointer: pointer,
-                                initial_x: x,
-                                initial_y: y,
+                            });
+                            handled = true;
+                        }
+                    }
+
+                    // 3. Drawing new annotation (or marquee selection if Shift held)
+                    if !handled {
+                        if shift_held {
+                            app.marquee = Some(Draft {
+                                start: pointer,
+                                current: pointer,
                             });
                         } else {
-                            app.selected = None;
+                            app.selected.clear();
                             app.editing_label = None;
                             app.draft = Some(Draft {
                                 start: pointer,
@@ -234,16 +305,39 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                         match active_drag {
                             ActiveDrag::Move {
-                                id,
-                                initial_x,
-                                initial_y,
+                                initial_positions,
                                 ..
                             } => {
-                                if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == *id) {
-                                    let new_x = (initial_x + delta_x).clamp(0.0, image_size.x - annotation.width);
-                                    let new_y = (initial_y + delta_y).clamp(0.0, image_size.y - annotation.height);
-                                    annotation.x = new_x.round();
-                                    annotation.y = new_y.round();
+                                let mut min_dx = -f32::INFINITY;
+                                let mut max_dx = f32::INFINITY;
+                                let mut min_dy = -f32::INFINITY;
+                                let mut max_dy = f32::INFINITY;
+
+                                for &(id, init_x, init_y) in initial_positions {
+                                    if let Some(a) = app.annotations.iter().find(|a| a.id == id) {
+                                        min_dx = min_dx.max(-init_x);
+                                        max_dx = max_dx.min(image_size.x - (init_x + a.width));
+                                        min_dy = min_dy.max(-init_y);
+                                        max_dy = max_dy.min(image_size.y - (init_y + a.height));
+                                    }
+                                }
+
+                                let clamped_dx = if min_dx <= max_dx {
+                                    delta_x.clamp(min_dx, max_dx)
+                                } else {
+                                    0.0
+                                };
+                                let clamped_dy = if min_dy <= max_dy {
+                                    delta_y.clamp(min_dy, max_dy)
+                                } else {
+                                    0.0
+                                };
+
+                                for &(id, init_x, init_y) in initial_positions {
+                                    if let Some(a) = app.annotations.iter_mut().find(|a| a.id == id) {
+                                        a.x = (init_x + clamped_dx).round();
+                                        a.y = (init_y + clamped_dy).round();
+                                    }
                                 }
                             }
                             ActiveDrag::Resize {
@@ -291,6 +385,8 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         }
                     } else if let Some(draft) = &mut app.draft {
                         draft.current = image_rect.clamp(pointer);
+                    } else if let Some(marquee) = &mut app.marquee {
+                        marquee.current = image_rect.clamp(pointer);
                     }
                 }
             }
@@ -324,10 +420,24 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             parent_id: None,
                         });
 
-                        app.selected = Some(id);
+                        app.select_single(id);
                         app.editing_label = Some(id);
                         app.request_label_focus = true;
                         app.status = format!("REGION {id:02} CREATED");
+                    }
+                }
+                if let Some(marquee) = app.marquee.take() {
+                    let screen_rect = Rect::from_two_pos(marquee.start, marquee.current);
+                    if screen_rect.width() >= 3.0 || screen_rect.height() >= 3.0 {
+                        for a in &app.annotations {
+                            let a_rect = annotation_screen_rect(a, image_rect, image_size);
+                            if screen_rect.intersects(a_rect) || screen_rect.contains_rect(a_rect) {
+                                app.selected.insert(a.id);
+                            }
+                        }
+                        if !app.selected.is_empty() {
+                            app.status = format!("{} REGION(S) SELECTED", app.selected.len());
+                        }
                     }
                 }
                 update_hierarchy(&mut app.annotations);
@@ -335,19 +445,24 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
             if response.clicked() && !response.double_clicked() {
                 if let Some(pointer) = response.interact_pointer_pos() {
-                    app.selected = app
-                        .annotations
-                        .iter()
-                        .rev()
-                        .find(|annotation| {
-                            annotation_tag_rect(annotation, image_rect, image_size).contains(pointer)
-                                || annotation_screen_rect(annotation, image_rect, image_size).contains(pointer)
-                        })
-                        .map(|annotation| annotation.id);
+                    let shift_held = ctx.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
+                    let hit = hit_annotation(&app.annotations, image_rect, image_size, pointer);
+
+                    if let Some(annotation) = hit {
+                        let hit_id = annotation.id;
+                        if shift_held {
+                            app.toggle_select(hit_id);
+                        } else {
+                            app.select_single(hit_id);
+                        }
+                    } else if !shift_held {
+                        app.deselect_all();
+                    }
                 }
             }
 
             let editing_id = app.editing_label;
+            let selected_ids = app.selected.clone();
             let mut close_editing = false;
 
             for annotation in &mut app.annotations {
@@ -359,7 +474,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     rect,
                     &annotation.label,
                     annotation.color32(),
-                    app.selected == Some(annotation.id),
+                    selected_ids.contains(&annotation.id),
                 );
 
                 if is_editing {
@@ -404,6 +519,20 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 );
             }
 
+            if let Some(marquee) = &app.marquee {
+                let m_rect = Rect::from_two_pos(marquee.start, marquee.current);
+                painter.rect_filled(
+                    m_rect,
+                    0.0,
+                    Color32::from_rgba_unmultiplied(41, 121, 255, 30),
+                );
+                painter.rect_stroke(
+                    m_rect,
+                    0.0,
+                    Stroke::new(1.0_f32, Color32::from_rgb(41, 121, 255)),
+                );
+            }
+
             let zoom_label = format!("ZOOM {:>3.0}%", app.zoom * 100.0);
             let zoom_galley = painter.layout_no_wrap(
                 zoom_label,
@@ -427,5 +556,65 @@ fn active_drag_start_pointer(drag: &ActiveDrag) -> Pos2 {
     match drag {
         ActiveDrag::Move { start_pointer, .. } => *start_pointer,
         ActiveDrag::Resize { start_pointer, .. } => *start_pointer,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_annotation(id: u32, x: f32, y: f32, width: f32, height: f32) -> Annotation {
+        Annotation {
+            id,
+            label: format!("region_{id}"),
+            description: None,
+            x,
+            y,
+            width,
+            height,
+            color: [255, 0, 0],
+            parent_id: None,
+        }
+    }
+
+    #[test]
+    fn test_hit_annotation_prioritizes_tag_inside_container_box() {
+        let image_rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 1000.0));
+        let image_size = Vec2::new(1000.0, 1000.0);
+
+        // Parent container (id 1) covering (0,0) to (500,500)
+        let parent = sample_annotation(1, 0.0, 0.0, 500.0, 500.0);
+        // Child box (id 2) covering (100, 100) to (200, 200)
+        let child = sample_annotation(2, 100.0, 100.0, 100.0, 100.0);
+
+        let annotations = vec![parent, child];
+
+        // Child tag is around (100.0, 84.0) to (160.0, 100.0), which falls inside parent (0..500, 0..500)
+        let child_tag = annotation_tag_rect(&annotations[1], image_rect, image_size);
+        let pointer_on_tag = child_tag.center();
+
+        let hit = hit_annotation(&annotations, image_rect, image_size, pointer_on_tag);
+        assert_eq!(hit.map(|a| a.id), Some(2));
+    }
+
+    #[test]
+    fn test_hit_annotation_prioritizes_innermost_child_box() {
+        let image_rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 1000.0));
+        let image_size = Vec2::new(1000.0, 1000.0);
+
+        // Parent container (id 1) covering (0,0) to (500,500), area = 250,000
+        let parent = sample_annotation(1, 0.0, 0.0, 500.0, 500.0);
+        // Child box (id 2) covering (100, 100) to (200, 200), area = 10,000
+        let child = sample_annotation(2, 100.0, 100.0, 100.0, 100.0);
+
+        let annotations = vec![parent, child];
+
+        // Click inside child body at (150, 150)
+        let hit = hit_annotation(&annotations, image_rect, image_size, Pos2::new(150.0, 150.0));
+        assert_eq!(hit.map(|a| a.id), Some(2));
+
+        // Click inside parent body but outside child at (50, 50)
+        let hit_parent = hit_annotation(&annotations, image_rect, image_size, Pos2::new(50.0, 50.0));
+        assert_eq!(hit_parent.map(|a| a.id), Some(1));
     }
 }

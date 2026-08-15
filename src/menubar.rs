@@ -15,6 +15,7 @@ pub struct NativeMenuBar {
     pub export_dataset_json: MenuItem,
     pub undo: MenuItem,
     pub redo: MenuItem,
+    pub select_all: MenuItem,
     pub delete_region: MenuItem,
     pub deselect: MenuItem,
     pub prev_image: MenuItem,
@@ -122,9 +123,15 @@ impl NativeMenuBar {
                 Code::KeyZ,
             )),
         );
+        let select_all = MenuItem::with_id(
+            "select_all",
+            "Select All",
+            false,
+            Some(Accelerator::new(Some(Modifiers::SUPER), Code::KeyA)),
+        );
         let delete_region = MenuItem::with_id(
             "delete_region",
-            "Delete Selected Region",
+            "Delete Selected",
             false,
             Some(Accelerator::new(None, Code::Backspace)),
         );
@@ -143,7 +150,7 @@ impl NativeMenuBar {
             &PredefinedMenuItem::cut(None),
             &PredefinedMenuItem::copy(None),
             &PredefinedMenuItem::paste(None),
-            &PredefinedMenuItem::select_all(None),
+            &select_all,
             &PredefinedMenuItem::separator(),
             &delete_region,
             &deselect,
@@ -213,6 +220,7 @@ impl NativeMenuBar {
             export_dataset_json,
             undo,
             redo,
+            select_all,
             delete_region,
             deselect,
             prev_image,
@@ -228,6 +236,7 @@ impl NativeMenuBar {
         has_image: bool,
         has_dataset: bool,
         has_selection: bool,
+        has_annotations: bool,
         can_undo: bool,
         can_redo: bool,
         can_prev: bool,
@@ -246,6 +255,7 @@ impl NativeMenuBar {
         let _ = self.undo.set_enabled(can_undo);
         let _ = self.redo.set_enabled(can_redo);
 
+        let _ = self.select_all.set_enabled(has_annotations);
         let _ = self.delete_region.set_enabled(has_selection);
         let _ = self.deselect.set_enabled(has_selection);
     }
@@ -261,7 +271,8 @@ pub fn handle_native_menu_events(app: &mut AnnotatorApp, ctx: &egui::Context) {
         menubar.update_states(
             app.image.is_some(),
             !app.image_files.is_empty(),
-            app.selected.is_some(),
+            !app.selected.is_empty(),
+            !app.annotations.is_empty(),
             app.can_undo(),
             app.can_redo(),
             can_prev,
@@ -279,13 +290,11 @@ pub fn handle_native_menu_events(app: &mut AnnotatorApp, ctx: &egui::Context) {
             "export_dataset_json" => app.export_unified_dataset_dialog(),
             "undo" => app.undo(),
             "redo" => app.redo(),
+            "select_all" => app.select_all(),
             "prev_image" => app.previous_image(ctx),
             "next_image" => app.next_image(ctx),
             "delete_region" => app.delete_selected(),
-            "deselect" => {
-                app.selected = None;
-                app.editing_label = None;
-            }
+            "deselect" => app.deselect_all(),
             "reset_view" => {
                 app.zoom = 1.0;
                 app.pan = egui::Vec2::ZERO;

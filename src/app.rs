@@ -43,10 +43,11 @@ fn resolve_image_path(anno_path: &Path, image_str: &str) -> PathBuf {
 pub struct AnnotatorApp {
     pub image: Option<LoadedImage>,
     pub annotations: Vec<Annotation>,
-    pub selected: Option<u32>,
+    pub selected: HashSet<u32>,
     pub editing_label: Option<u32>,
     pub next_id: u32,
     pub draft: Option<Draft>,
+    pub marquee: Option<Draft>,
     pub active_drag: Option<ActiveDrag>,
     pub zoom: f32,
     pub pan: egui::Vec2,
@@ -73,10 +74,11 @@ impl AnnotatorApp {
         Self {
             image: None,
             annotations: Vec::new(),
-            selected: None,
+            selected: HashSet::new(),
             editing_label: None,
             next_id: 1,
             draft: None,
+            marquee: None,
             active_drag: None,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
@@ -96,6 +98,37 @@ impl AnnotatorApp {
             annotations_cache: HashMap::new(),
             loader: BackgroundLoader::new(),
         }
+    }
+
+    pub fn is_selected(&self, id: u32) -> bool {
+        self.selected.contains(&id)
+    }
+
+    pub fn select_single(&mut self, id: u32) {
+        self.selected.clear();
+        self.selected.insert(id);
+    }
+
+    pub fn toggle_select(&mut self, id: u32) {
+        if self.selected.contains(&id) {
+            self.selected.remove(&id);
+        } else {
+            self.selected.insert(id);
+        }
+    }
+
+    pub fn select_all(&mut self) {
+        self.selected = self.annotations.iter().map(|a| a.id).collect();
+        if self.selected.is_empty() {
+            self.status = "NO REGIONS TO SELECT".into();
+        } else {
+            self.status = format!("{} REGION(S) SELECTED", self.selected.len());
+        }
+    }
+
+    pub fn deselect_all(&mut self) {
+        self.selected.clear();
+        self.editing_label = None;
     }
 
     pub fn request_thumbnail(&mut self, path: &Path) {
@@ -449,7 +482,8 @@ impl AnnotatorApp {
 
         self.annotation_counts
             .insert(path.to_path_buf(), self.annotations.len());
-        self.selected = None;
+        self.selected.clear();
+        self.marquee = None;
         self.editing_label = None;
         self.active_drag = None;
         self.zoom = 1.0;
@@ -519,7 +553,8 @@ impl AnnotatorApp {
                 update_hierarchy(&mut self.annotations);
                 let max_id = self.annotations.iter().map(|a| a.id).max().unwrap_or(0);
                 self.next_id = project.next_id.max(max_id + 1);
-                self.selected = None;
+                self.selected.clear();
+                self.marquee = None;
                 self.editing_label = None;
                 self.active_drag = None;
                 self.zoom = 1.0;
@@ -632,7 +667,7 @@ impl AnnotatorApp {
     pub fn current_snapshot(&self) -> AppSnapshot {
         AppSnapshot {
             annotations: self.annotations.clone(),
-            selected: self.selected,
+            selected: self.selected.clone(),
             next_id: self.next_id,
         }
     }
@@ -645,6 +680,7 @@ impl AnnotatorApp {
         self.editing_label = None;
         self.active_drag = None;
         self.draft = None;
+        self.marquee = None;
     }
 
     pub fn undo(&mut self) {
@@ -1013,19 +1049,24 @@ impl AnnotatorApp {
     }
 
     pub fn delete_selected(&mut self) {
-        if let Some(id) = self.selected {
+        if !self.selected.is_empty() {
             self.history.record(self.current_snapshot());
-            self.selected = None;
-            self.annotations.retain(|annotation| annotation.id != id);
+            let count = self.selected.len();
+            self.annotations.retain(|annotation| !self.selected.contains(&annotation.id));
+            self.selected.clear();
             update_hierarchy(&mut self.annotations);
             self.editing_label = None;
             self.active_drag = None;
-            self.status = "ANNOTATION DELETED".into();
+            self.status = if count == 1 {
+                "ANNOTATION DELETED".into()
+            } else {
+                format!("{count} ANNOTATIONS DELETED")
+            };
         }
     }
 
     pub fn shortcuts_and_drops(&mut self, ctx: &egui::Context) {
-        let (open_img, open_folder, open_proj, save_proj, export_json, export_dataset, undo, redo, delete, prev_img, next_img, escape, dropped) = ctx.input(|input| {
+        let (open_img, open_folder, open_proj, save_proj, export_json, export_dataset, undo, redo, delete, prev_img, next_img, escape, select_all, deselect, dropped) = ctx.input(|input| {
             let cmd_or_ctrl = input.modifiers.command || input.modifiers.ctrl;
             let shift = input.modifiers.shift;
             let alt = input.modifiers.alt;
@@ -1041,10 +1082,12 @@ impl AnnotatorApp {
                     || (cmd_or_ctrl && input.key_pressed(Key::Y)),
                 input.key_pressed(Key::Delete) || input.key_pressed(Key::Backspace),
                 input.key_pressed(Key::OpenBracket)
-                    || (!cmd_or_ctrl && !alt && input.key_pressed(Key::A)),
+                    || (!cmd_or_ctrl && !alt && !shift && input.key_pressed(Key::A)),
                 input.key_pressed(Key::CloseBracket)
-                    || (!cmd_or_ctrl && !alt && input.key_pressed(Key::D)),
+                    || (!cmd_or_ctrl && !alt && !shift && input.key_pressed(Key::D)),
                 input.key_pressed(Key::Escape),
+                cmd_or_ctrl && !shift && !alt && input.key_pressed(Key::A),
+                cmd_or_ctrl && !shift && !alt && input.key_pressed(Key::D),
                 input.raw.dropped_files.clone(),
             )
         });
@@ -1074,6 +1117,10 @@ impl AnnotatorApp {
                 self.undo();
             } else if delete {
                 self.delete_selected();
+            } else if select_all {
+                self.select_all();
+            } else if deselect {
+                self.deselect_all();
             } else if prev_img {
                 self.previous_image(ctx);
             } else if next_img {
@@ -1082,9 +1129,10 @@ impl AnnotatorApp {
         }
         if escape {
             self.draft = None;
+            self.marquee = None;
             self.active_drag = None;
             self.editing_label = None;
-            self.selected = None;
+            self.selected.clear();
         }
         if let Some(path) = dropped.into_iter().find_map(|file| file.path) {
             if path.is_dir() {
@@ -1121,10 +1169,11 @@ mod tests {
         AnnotatorApp {
             image: None,
             annotations: Vec::new(),
-            selected: None,
+            selected: HashSet::new(),
             editing_label: None,
             next_id: 1,
             draft: None,
+            marquee: None,
             active_drag: None,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
@@ -1169,7 +1218,7 @@ mod tests {
         // Snapshot initial empty state and add annotation 1
         app.history.record(app.current_snapshot());
         app.annotations.push(sample_annotation(1));
-        app.selected = Some(1);
+        app.selected.insert(1);
         app.next_id = 2;
 
         assert!(app.can_undo());
@@ -1179,14 +1228,14 @@ mod tests {
         // Undo
         app.undo();
         assert_eq!(app.annotations.len(), 0);
-        assert_eq!(app.selected, None);
+        assert!(app.selected.is_empty());
         assert!(!app.can_undo());
         assert!(app.can_redo());
 
         // Redo
         app.redo();
         assert_eq!(app.annotations.len(), 1);
-        assert_eq!(app.selected, Some(1));
+        assert!(app.selected.contains(&1));
         assert!(app.can_undo());
         assert!(!app.can_redo());
     }
@@ -1195,17 +1244,76 @@ mod tests {
     fn test_undo_redo_delete_selected() {
         let mut app = test_app();
         app.annotations.push(sample_annotation(1));
-        app.selected = Some(1);
+        app.selected.insert(1);
 
         app.delete_selected();
         assert_eq!(app.annotations.len(), 0);
-        assert_eq!(app.selected, None);
+        assert!(app.selected.is_empty());
         assert!(app.can_undo());
 
         app.undo();
         assert_eq!(app.annotations.len(), 1);
         assert_eq!(app.annotations[0].id, 1);
-        assert_eq!(app.selected, Some(1));
+        assert!(app.selected.contains(&1));
+    }
+
+    #[test]
+    fn test_multi_select_helpers() {
+        let mut app = test_app();
+        app.annotations.push(sample_annotation(1));
+        app.annotations.push(sample_annotation(2));
+        app.annotations.push(sample_annotation(3));
+
+        app.select_single(1);
+        assert_eq!(app.selected.len(), 1);
+        assert!(app.is_selected(1));
+
+        app.toggle_select(2);
+        assert_eq!(app.selected.len(), 2);
+        assert!(app.is_selected(1));
+        assert!(app.is_selected(2));
+
+        app.toggle_select(1);
+        assert_eq!(app.selected.len(), 1);
+        assert!(!app.is_selected(1));
+        assert!(app.is_selected(2));
+
+        app.select_all();
+        assert_eq!(app.selected.len(), 3);
+        assert!(app.is_selected(1));
+        assert!(app.is_selected(2));
+        assert!(app.is_selected(3));
+
+        app.deselect_all();
+        assert!(app.selected.is_empty());
+    }
+
+    #[test]
+    fn test_multi_select_delete_undo_redo() {
+        let mut app = test_app();
+        app.annotations.push(sample_annotation(1));
+        app.annotations.push(sample_annotation(2));
+        app.annotations.push(sample_annotation(3));
+
+        app.selected.insert(1);
+        app.selected.insert(3);
+
+        app.delete_selected();
+        assert_eq!(app.annotations.len(), 1);
+        assert_eq!(app.annotations[0].id, 2);
+        assert!(app.selected.is_empty());
+        assert!(app.can_undo());
+
+        app.undo();
+        assert_eq!(app.annotations.len(), 3);
+        assert!(app.is_selected(1));
+        assert!(!app.is_selected(2));
+        assert!(app.is_selected(3));
+
+        app.redo();
+        assert_eq!(app.annotations.len(), 1);
+        assert_eq!(app.annotations[0].id, 2);
+        assert!(app.selected.is_empty());
     }
 
     #[test]
@@ -1460,5 +1568,35 @@ mod tests {
         assert_eq!(restored.next_id, 5);
 
         std::fs::remove_dir_all(dataset_folder).unwrap();
+    }
+
+    #[test]
+    fn test_multi_select_batch_label_and_color() {
+        let mut app = test_app();
+        app.annotations.push(sample_annotation(1));
+        app.annotations.push(sample_annotation(2));
+        app.annotations.push(sample_annotation(3));
+
+        app.selected.insert(1);
+        app.selected.insert(2);
+
+        // Batch label update
+        for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id)) {
+            a.label = "vehicle".into();
+        }
+
+        assert_eq!(app.annotations[0].label, "vehicle");
+        assert_eq!(app.annotations[1].label, "vehicle");
+        assert_eq!(app.annotations[2].label, "region_3");
+
+        // Batch color update
+        let new_color = [0, 230, 118];
+        for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id)) {
+            a.color = new_color;
+        }
+
+        assert_eq!(app.annotations[0].color, new_color);
+        assert_eq!(app.annotations[1].color, new_color);
+        assert_eq!(app.annotations[2].color, [255, 0, 0]);
     }
 }

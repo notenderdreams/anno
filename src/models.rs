@@ -12,10 +12,8 @@ pub enum ResizeHandle {
 
 pub enum ActiveDrag {
     Move {
-        id: u32,
+        initial_positions: Vec<(u32, f32, f32)>,
         start_pointer: Pos2,
-        initial_x: f32,
-        initial_y: f32,
     },
     Resize {
         id: u32,

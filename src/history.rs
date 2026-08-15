@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use crate::models::Annotation;
 
@@ -6,7 +7,7 @@ const DEFAULT_CAPACITY: usize = 100;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AppSnapshot {
     pub annotations: Vec<Annotation>,
-    pub selected: Option<u32>,
+    pub selected: HashSet<u32>,
     pub next_id: u32,
 }
 
@@ -148,10 +149,10 @@ mod tests {
         }
     }
 
-    fn snapshot(ids: &[u32], selected: Option<u32>, next_id: u32) -> AppSnapshot {
+    fn snapshot(ids: &[u32], selected: &[u32], next_id: u32) -> AppSnapshot {
         AppSnapshot {
             annotations: ids.iter().copied().map(sample_annotation).collect(),
-            selected,
+            selected: selected.iter().copied().collect(),
             next_id,
         }
     }
@@ -162,9 +163,9 @@ mod tests {
         assert!(!history.can_undo());
         assert!(!history.can_redo());
 
-        let s0 = snapshot(&[], None, 1);
-        let s1 = snapshot(&[1], Some(1), 2);
-        let s2 = snapshot(&[1, 2], Some(2), 3);
+        let s0 = snapshot(&[], &[], 1);
+        let s1 = snapshot(&[1], &[1], 2);
+        let s2 = snapshot(&[1, 2], &[2], 3);
 
         // Record s0 -> current is s1
         history.record(s0.clone());
@@ -197,14 +198,33 @@ mod tests {
     }
 
     #[test]
+    fn test_multi_select_undo_redo() {
+        let mut history = History::new();
+        let s0 = snapshot(&[1, 2, 3], &[1, 2], 4);
+        let s1 = snapshot(&[1, 2, 3], &[1, 2, 3], 4);
+
+        history.record(s0.clone());
+        let restored = history.undo(s1.clone()).unwrap();
+        assert_eq!(restored.selected.len(), 2);
+        assert!(restored.selected.contains(&1));
+        assert!(restored.selected.contains(&2));
+
+        let redone = history.redo(s0).unwrap();
+        assert_eq!(redone.selected.len(), 3);
+        assert!(redone.selected.contains(&1));
+        assert!(redone.selected.contains(&2));
+        assert!(redone.selected.contains(&3));
+    }
+
+    #[test]
     fn test_begin_and_commit_edit() {
         let mut history = History::new();
-        let s0 = snapshot(&[1], Some(1), 2);
-        let s1 = snapshot(&[1, 2], Some(2), 3);
+        let s0 = snapshot(&[1], &[1], 2);
+        let s1 = snapshot(&[1, 2], &[2], 3);
 
         history.begin_edit(s0.clone());
         // Duplicate call does not overwrite baseline
-        history.begin_edit(snapshot(&[999], None, 999));
+        history.begin_edit(snapshot(&[999], &[], 999));
 
         // Commit with change
         history.commit_edit(&s1);
@@ -217,7 +237,7 @@ mod tests {
     #[test]
     fn test_commit_edit_without_change_ignored() {
         let mut history = History::new();
-        let s0 = snapshot(&[1], Some(1), 2);
+        let s0 = snapshot(&[1], &[1], 2);
 
         history.begin_edit(s0.clone());
         history.commit_edit(&s0);
@@ -229,7 +249,7 @@ mod tests {
         let mut history = History::with_capacity(3);
 
         for i in 0..5 {
-            history.record(snapshot(&[i], Some(i), i + 1));
+            history.record(snapshot(&[i], &[i], i + 1));
         }
 
         assert_eq!(history.undo_count(), 3);
@@ -238,8 +258,8 @@ mod tests {
     #[test]
     fn test_clear() {
         let mut history = History::new();
-        history.record(snapshot(&[1], Some(1), 2));
-        history.begin_edit(snapshot(&[2], Some(2), 3));
+        history.record(snapshot(&[1], &[1], 2));
+        history.begin_edit(snapshot(&[2], &[2], 3));
         history.clear();
 
         assert!(!history.can_undo());

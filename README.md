@@ -28,13 +28,17 @@ Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` /
 - `Cmd/Ctrl+Option+O` / `Cmd+Shift+F` — open folder dataset
 - `A` / `[` — previous image in dataset
 - `D` / `]` — next image in dataset
+- `Cmd/Ctrl+A` — select all annotations
+- `Shift` + click / `Cmd/Ctrl` + click — toggle / multi-select regions (canvas or hierarchy)
+- `Shift` + drag — marquee box multi-selection
+- Drag selected — move all selected regions together in unison
 - `Cmd/Ctrl+S` — save a single-image `.anno` project or multi-image `.annobatch`
 - `Cmd/Ctrl+E` — export current image JSON
 - `Cmd/Ctrl+Shift+E` — export unified dataset JSON
 - `Cmd/Ctrl+Z` — undo
 - `Cmd/Ctrl+Shift+Z` / `Cmd/Ctrl+Y` — redo
-- `Delete` / `Backspace` — remove the selected region
-- `Escape` — cancel drawing or deselect
+- `Delete` / `Backspace` — remove selected region(s)
+- `Escape` / `Cmd/Ctrl+D` — cancel drawing or deselect all
 - Scroll — zoom toward the cursor
 - `Space` + drag or middle-drag — pan
 

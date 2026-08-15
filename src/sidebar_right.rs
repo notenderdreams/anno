@@ -27,7 +27,8 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.add_space(4.0);
 
-            if let Some(selected_id) = app.selected {
+            if app.selected.len() == 1 {
+                let selected_id = *app.selected.iter().next().unwrap();
                 let mut should_delete = false;
                 let mut bounds_changed = false;
 
@@ -234,6 +235,226 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 if should_delete {
                     app.delete_selected();
                 }
+            } else if app.selected.len() > 1 {
+                let mut should_delete = false;
+                let count = app.selected.len();
+
+                ui.label(
+                    RichText::new(format!("{count} REGIONS SELECTED"))
+                        .size(9.0)
+                        .strong()
+                        .color(RED),
+                );
+                ui.add_space(8.0);
+                ui.label(RichText::new("SET LABEL (ALL)").size(9.0).color(MUTED));
+
+                let first_id = *app.selected.iter().next().unwrap();
+                let all_same_label = {
+                    let first_label = app.annotations.iter().find(|a| a.id == first_id).map(|a| &a.label);
+                    app.annotations
+                        .iter()
+                        .filter(|a| app.selected.contains(&a.id))
+                        .all(|a| Some(&a.label) == first_label)
+                };
+                let mut batch_label = if all_same_label {
+                    app.annotations
+                        .iter()
+                        .find(|a| a.id == first_id)
+                        .map(|a| a.label.clone())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut batch_label)
+                        .font(FontId::monospace(12.0))
+                        .desired_width(f32::INFINITY)
+                        .hint_text("Set common label...")
+                        .margin(Vec2::new(8.0, 7.0)),
+                );
+
+                if response.gained_focus() {
+                    edit_started = true;
+                }
+                if response.changed() {
+                    for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id)) {
+                        a.label = batch_label.clone();
+                    }
+                }
+                if response.lost_focus() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                    edit_committed = true;
+                }
+
+                ui.add_space(10.0);
+                ui.label(RichText::new("SET DESCRIPTION (ALL)").size(9.0).color(MUTED));
+                ui.add_space(4.0);
+
+                let all_same_desc = {
+                    let first_desc = app
+                        .annotations
+                        .iter()
+                        .find(|a| a.id == first_id)
+                        .and_then(|a| a.description.as_ref());
+                    app.annotations
+                        .iter()
+                        .filter(|a| app.selected.contains(&a.id))
+                        .all(|a| a.description.as_ref() == first_desc)
+                };
+                let mut batch_desc = if all_same_desc {
+                    app.annotations
+                        .iter()
+                        .find(|a| a.id == first_id)
+                        .and_then(|a| a.description.clone())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+
+                let desc_response = ui.add(
+                    egui::TextEdit::multiline(&mut batch_desc)
+                        .font(FontId::monospace(11.0))
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(2)
+                        .hint_text("Set common description...")
+                        .margin(Vec2::new(8.0, 7.0)),
+                );
+                if desc_response.gained_focus() {
+                    edit_started = true;
+                }
+                if desc_response.changed() {
+                    let new_desc = if batch_desc.trim().is_empty() {
+                        None
+                    } else {
+                        Some(batch_desc.clone())
+                    };
+                    for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id)) {
+                        a.description = new_desc.clone();
+                    }
+                }
+                if desc_response.lost_focus() {
+                    edit_committed = true;
+                }
+
+                ui.add_space(12.0);
+                ui.label(RichText::new("SET COLOR (ALL)").size(9.0).color(MUTED));
+                ui.add_space(4.0);
+
+                ui.horizontal(|ui| {
+                    let presets: [[u8; 3]; 6] = [
+                        [255, 0, 0],   // Red
+                        [0, 230, 118], // Green
+                        [41, 121, 255], // Blue
+                        [255, 214, 0], // Yellow
+                        [255, 145, 0], // Orange
+                        [0, 229, 255], // Cyan
+                    ];
+
+                    for rgb in presets {
+                        let color32 = Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+                        let (rect, response) =
+                            ui.allocate_exact_size(Vec2::splat(20.0), egui::Sense::click());
+                        if ui.is_rect_visible(rect) {
+                            ui.painter().rect_filled(rect, 2.0, color32);
+                            if response.hovered() {
+                                ui.painter().rect_stroke(
+                                    rect.expand(1.0),
+                                    2.0,
+                                    Stroke::new(1.0_f32, Color32::GRAY),
+                                );
+                            }
+                        }
+                        if response.clicked() {
+                            picked_color = Some(rgb);
+                        }
+                    }
+
+                    ui.add_space(4.0);
+
+                    let (rect, picker_response) =
+                        ui.allocate_exact_size(Vec2::splat(20.0), egui::Sense::click());
+                    if ui.is_rect_visible(rect) {
+                        ui.painter().rect_filled(rect, 2.0, Color32::from_gray(40));
+                        ui.painter().rect_stroke(
+                            rect,
+                            2.0,
+                            Stroke::new(1.0_f32, Color32::from_gray(120)),
+                        );
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "+",
+                            FontId::monospace(12.0),
+                            Color32::WHITE,
+                        );
+                    }
+
+                    let popup_id = ui.make_persistent_id("batch_color_picker_popup");
+                    if picker_response.clicked() {
+                        edit_started = true;
+                        ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+                    }
+
+                    egui::popup_below_widget(
+                        ui,
+                        popup_id,
+                        &picker_response,
+                        egui::PopupCloseBehavior::CloseOnClickOutside,
+                        |ui| {
+                            ui.set_max_width(200.0);
+                            let mut color32 = Color32::RED;
+                            if egui::color_picker::color_picker_color32(
+                                ui,
+                                &mut color32,
+                                egui::color_picker::Alpha::Opaque,
+                            ) {
+                                picked_color = Some([color32.r(), color32.g(), color32.b()]);
+                            }
+                        },
+                    );
+                });
+
+
+                ui.add_space(14.0);
+                if ui
+                    .add_sized(
+                        [ui.available_width(), 30.0],
+                        egui::Button::new(RichText::new(format!("DELETE {count} REGIONS")).size(10.0).color(RED)),
+                    )
+                    .clicked()
+                {
+                    should_delete = true;
+                }
+
+                ui.add_space(4.0);
+                if ui
+                    .add_sized(
+                        [ui.available_width(), 24.0],
+                        egui::Button::new(RichText::new("CLEAR SELECTION").size(9.0).color(MUTED)),
+                    )
+                    .clicked()
+                {
+                    app.deselect_all();
+                }
+
+                if let Some(color) = picked_color {
+                    app.history.record(app.current_snapshot());
+                    for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id)) {
+                        a.color = color;
+                    }
+                }
+
+                if edit_started {
+                    app.history.begin_edit(app.current_snapshot());
+                }
+
+                if edit_committed {
+                    app.history.commit_edit(&app.current_snapshot());
+                }
+
+                if should_delete {
+                    app.delete_selected();
+                }
             } else {
                 ui.add_space(16.0);
                 ui.vertical_centered(|ui| {
@@ -247,7 +468,7 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     ui.label(RichText::new("NO REGION SELECTED").size(10.0).color(MUTED));
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("Click or drag on image to annotate.")
+                        RichText::new("Click, Shift+drag, or drag on image to annotate.")
                             .size(10.0)
                             .color(Color32::from_gray(92)),
                     );

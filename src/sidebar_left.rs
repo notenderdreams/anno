@@ -63,8 +63,13 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         .color(MUTED),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let count_text = if app.selected.len() > 1 {
+                        format!("{}/{}", app.selected.len(), app.annotations.len())
+                    } else {
+                        app.annotations.len().to_string()
+                    };
                     ui.label(
-                        RichText::new(app.annotations.len().to_string())
+                        RichText::new(count_text)
                             .size(11.0)
                             .strong()
                             .color(RED),
@@ -127,7 +132,7 @@ fn render_tree_branch(
         let Some(a) = app.annotations.iter().find(|a| a.id == annotation_id) else {
             return;
         };
-        (a.label.clone(), a.color32(), app.selected == Some(annotation_id))
+        (a.label.clone(), a.color32(), app.is_selected(annotation_id))
     };
 
     let children_ids: Vec<u32> = app
@@ -287,7 +292,12 @@ fn render_tree_branch(
     ui.advance_cursor_after_rect(row_rect);
 
     if response.clicked() {
-        app.selected = Some(annotation_id);
+        let modifier = ui.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
+        if modifier {
+            app.toggle_select(annotation_id);
+        } else {
+            app.select_single(annotation_id);
+        }
     }
 
     if has_children && is_open {
