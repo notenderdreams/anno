@@ -78,38 +78,43 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
             let (response, painter) = ui.allocate_painter(available, Sense::click_and_drag());
             let canvas = response.rect;
 
-            let Some(image) = &app.image else {
-                let center = canvas.center();
+            let (texture_id, image_size) = match &app.image {
+                Some(image) => (
+                    image.texture.id(),
+                    Vec2::new(image.width as f32, image.height as f32),
+                ),
+                None => {
+                    let center = canvas.center();
 
-                painter.text(
-                    center - Vec2::new(0.0, 30.0),
-                    Align2::CENTER_CENTER,
-                    "+",
-                    FontId::monospace(30.0),
-                    Color32::from_gray(72),
-                );
-                painter.text(
-                    center + Vec2::new(0.0, 12.0),
-                    Align2::CENTER_CENTER,
-                    "DROP AN IMAGE HERE",
-                    FontId::monospace(13.0),
-                    Color32::from_gray(170),
-                );
-                painter.text(
-                    center + Vec2::new(0.0, 35.0),
-                    Align2::CENTER_CENTER,
-                    "PNG  JPG  WEBP  BMP  TIFF",
-                    FontId::monospace(9.0),
-                    MUTED,
-                );
+                    painter.text(
+                        center - Vec2::new(0.0, 30.0),
+                        Align2::CENTER_CENTER,
+                        "+",
+                        FontId::monospace(30.0),
+                        Color32::from_gray(72),
+                    );
+                    painter.text(
+                        center + Vec2::new(0.0, 12.0),
+                        Align2::CENTER_CENTER,
+                        "DROP AN IMAGE HERE",
+                        FontId::monospace(13.0),
+                        Color32::from_gray(170),
+                    );
+                    painter.text(
+                        center + Vec2::new(0.0, 35.0),
+                        Align2::CENTER_CENTER,
+                        "PNG  JPG  WEBP  BMP  TIFF",
+                        FontId::monospace(9.0),
+                        MUTED,
+                    );
 
-                if response.clicked() {
-                    app.open_dialog(ctx);
+                    if response.clicked() {
+                        app.open_dialog(ctx);
+                    }
+                    return;
                 }
-                return;
             };
 
-            let image_size = Vec2::new(image.width as f32, image.height as f32);
             let fit_scale = (canvas.width() / image_size.x)
                 .min(canvas.height() / image_size.y)
                 .min(1.0);
@@ -152,15 +157,44 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
             painter.rect_filled(image_rect.expand(8.0), 0.0, Color32::BLACK);
             painter.image(
-                image.texture.id(),
+                texture_id,
                 image_rect,
                 Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
                 Color32::WHITE,
             );
 
+            let show_minimap = app.zoom > 1.01;
+            let (minimap_rect, minimap_img_rect) = if show_minimap {
+                let max_w = 160.0_f32;
+                let max_h = 105.0_f32;
+                let img_aspect = (image_size.x / image_size.y).max(0.01);
+                let (inner_w, inner_h) = if img_aspect >= max_w / max_h {
+                    (max_w, (max_w / img_aspect).clamp(24.0, max_h))
+                } else {
+                    ((max_h * img_aspect).clamp(24.0, max_w), max_h)
+                };
+                let header_h = 15.0_f32;
+                let pad = 6.0_f32;
+                let outer_w = inner_w + pad * 2.0;
+                let outer_h = inner_h + pad * 2.0 + header_h;
+                let m_rect = Rect::from_min_size(
+                    canvas.right_bottom() - Vec2::new(outer_w + 14.0, outer_h + 14.0),
+                    Vec2::new(outer_w, outer_h),
+                );
+                let m_img_rect = Rect::from_min_size(
+                    m_rect.min + Vec2::new(pad, pad + header_h),
+                    Vec2::new(inner_w, inner_h),
+                );
+                (Some(m_rect), Some(m_img_rect))
+            } else {
+                (None, None)
+            };
+
             if !is_panning && !space_held {
                 if let Some(pointer) = response.hover_pos() {
-                    if image_rect.contains(pointer) {
+                    if minimap_rect.map_or(false, |r| r.contains(pointer)) {
+                        ctx.set_cursor_icon(CursorIcon::PointingHand);
+                    } else if image_rect.contains(pointer) {
                         let mut cursor_set = false;
                         for &selected_id in &app.selected {
                             if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id) {
@@ -201,99 +235,107 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
             if response.double_clicked() {
                 if let Some(pointer) = response.interact_pointer_pos() {
-                    if let Some(hit) = hit_annotation(&app.annotations, image_rect, image_size, pointer) {
-                        let hit_id = hit.id;
-                        app.history.begin_edit(app.current_snapshot());
-                        app.select_single(hit_id);
-                        app.editing_label = Some(hit_id);
-                        app.request_label_focus = true;
+                    if !minimap_rect.map_or(false, |r| r.contains(pointer)) {
+                        if let Some(hit) = hit_annotation(&app.annotations, image_rect, image_size, pointer) {
+                            let hit_id = hit.id;
+                            app.history.begin_edit(app.current_snapshot());
+                            app.select_single(hit_id);
+                            app.editing_label = Some(hit_id);
+                            app.request_label_focus = true;
+                        }
                     }
                 }
             } else if response.drag_started_by(PointerButton::Primary) && !space_held {
-                if let Some(pointer) = response
-                    .interact_pointer_pos()
-                    .filter(|point| image_rect.contains(*point))
-                {
-                    let shift_held = ctx.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
-                    let mut handled = false;
+                if let Some(pointer) = response.interact_pointer_pos() {
+                    if minimap_rect.map_or(false, |r| r.contains(pointer)) {
+                        if let Some(m_img_rect) = minimap_img_rect {
+                            app.pan = pan_from_minimap_click(pointer, m_img_rect, display_size, canvas.size());
+                            app.active_drag = Some(ActiveDrag::MinimapPan {
+                                start_pointer: pointer,
+                            });
+                        }
+                    } else if image_rect.contains(pointer) {
+                        let shift_held = ctx.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
+                        let mut handled = false;
 
-                    // 1. Check resize handle on selected UNLOCKED annotations
-                    for &selected_id in &app.selected {
-                        if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
-                            let rect = annotation_screen_rect(annotation, image_rect, image_size);
-                            if let Some(handle) = hit_resize_handle(rect, pointer) {
-                                app.history.begin_edit(app.current_snapshot());
-                                app.active_drag = Some(ActiveDrag::Resize {
-                                    id: selected_id,
-                                    handle,
-                                    start_pointer: pointer,
-                                    initial_x: annotation.x,
-                                    initial_y: annotation.y,
-                                    initial_w: annotation.width,
-                                    initial_h: annotation.height,
-                                });
-                                handled = true;
-                                break;
+                        // 1. Check resize handle on selected UNLOCKED annotations
+                        for &selected_id in &app.selected {
+                            if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
+                                let rect = annotation_screen_rect(annotation, image_rect, image_size);
+                                if let Some(handle) = hit_resize_handle(rect, pointer) {
+                                    app.history.begin_edit(app.current_snapshot());
+                                    app.active_drag = Some(ActiveDrag::Resize {
+                                        id: selected_id,
+                                        handle,
+                                        start_pointer: pointer,
+                                        initial_x: annotation.x,
+                                        initial_y: annotation.y,
+                                        initial_w: annotation.width,
+                                        initial_h: annotation.height,
+                                    });
+                                    handled = true;
+                                    break;
+                                }
                             }
                         }
-                    }
 
-                    // 2. Check hit on annotation tag or ALREADY SELECTED body to move
-                    if !handled {
-                        let hit_tag = app
-                            .annotations
-                            .iter()
-                            .rev()
-                            .find(|a| annotation_tag_rect(a, image_rect, image_size).contains(pointer));
-
-                        let hit_selected_body = app
-                            .annotations
-                            .iter()
-                            .find(|a| {
-                                app.selected.contains(&a.id)
-                                    && annotation_screen_rect(a, image_rect, image_size).contains(pointer)
-                            });
-
-                        if let Some(hit) = hit_tag.or(hit_selected_body) {
-                            let id = hit.id;
-                            if shift_held {
-                                app.selected.insert(id);
-                            } else if !app.selected.contains(&id) {
-                                app.select_single(id);
-                            }
-
-                            let initial_positions: Vec<(u32, f32, f32)> = app
+                        // 2. Check hit on annotation tag or ALREADY SELECTED body to move
+                        if !handled {
+                            let hit_tag = app
                                 .annotations
                                 .iter()
-                                .filter(|a| app.selected.contains(&a.id) && !a.locked)
-                                .map(|a| (a.id, a.x, a.y))
-                                .collect();
+                                .rev()
+                                .find(|a| annotation_tag_rect(a, image_rect, image_size).contains(pointer));
 
-                            if !initial_positions.is_empty() {
-                                app.history.begin_edit(app.current_snapshot());
-                                app.active_drag = Some(ActiveDrag::Move {
-                                    initial_positions,
-                                    start_pointer: pointer,
+                            let hit_selected_body = app
+                                .annotations
+                                .iter()
+                                .find(|a| {
+                                    app.selected.contains(&a.id)
+                                        && annotation_screen_rect(a, image_rect, image_size).contains(pointer)
+                                });
+
+                            if let Some(hit) = hit_tag.or(hit_selected_body) {
+                                let id = hit.id;
+                                if shift_held {
+                                    app.selected.insert(id);
+                                } else if !app.selected.contains(&id) {
+                                    app.select_single(id);
+                                }
+
+                                let initial_positions: Vec<(u32, f32, f32)> = app
+                                    .annotations
+                                    .iter()
+                                    .filter(|a| app.selected.contains(&a.id) && !a.locked)
+                                    .map(|a| (a.id, a.x, a.y))
+                                    .collect();
+
+                                if !initial_positions.is_empty() {
+                                    app.history.begin_edit(app.current_snapshot());
+                                    app.active_drag = Some(ActiveDrag::Move {
+                                        initial_positions,
+                                        start_pointer: pointer,
+                                    });
+                                }
+                                handled = true;
+                            }
+                        }
+
+                        // 3. Drawing new annotation (or marquee selection if Shift held)
+                        if !handled {
+                            if shift_held {
+                                app.marquee = Some(Draft {
+                                    start: pointer,
+                                    current: pointer,
+                                });
+                            } else {
+                                app.selected.clear();
+                                app.editing_label = None;
+                                app.draft = Some(Draft {
+                                    start: pointer,
+                                    current: pointer,
                                 });
                             }
-                            handled = true;
-                        }
-                    }
-
-                    // 3. Drawing new annotation (or marquee selection if Shift held)
-                    if !handled {
-                        if shift_held {
-                            app.marquee = Some(Draft {
-                                start: pointer,
-                                current: pointer,
-                            });
-                        } else {
-                            app.selected.clear();
-                            app.editing_label = None;
-                            app.draft = Some(Draft {
-                                start: pointer,
-                                current: pointer,
-                            });
                         }
                     }
                 }
@@ -307,6 +349,11 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         let delta_y = delta_screen.y / image_rect.height() * image_size.y;
 
                         match active_drag {
+                            ActiveDrag::MinimapPan { .. } => {
+                                if let Some(m_img_rect) = minimap_img_rect {
+                                    app.pan = pan_from_minimap_click(pointer, m_img_rect, display_size, canvas.size());
+                                }
+                            }
                             ActiveDrag::Move {
                                 initial_positions,
                                 ..
@@ -395,9 +442,10 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
             }
 
             if response.drag_stopped_by(PointerButton::Primary) {
-                if app.active_drag.is_some() {
-                    app.active_drag = None;
-                    app.history.commit_edit(&app.current_snapshot());
+                if let Some(active_drag) = app.active_drag.take() {
+                    if !matches!(active_drag, ActiveDrag::MinimapPan { .. }) {
+                        app.history.commit_edit(&app.current_snapshot());
+                    }
                 }
                 if let Some(draft) = app.draft.take() {
                     let rect = Rect::from_two_pos(draft.start, draft.current);
@@ -449,18 +497,24 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
             if response.clicked() && !response.double_clicked() {
                 if let Some(pointer) = response.interact_pointer_pos() {
-                    let shift_held = ctx.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
-                    let hit = hit_annotation(&app.annotations, image_rect, image_size, pointer);
-
-                    if let Some(annotation) = hit {
-                        let hit_id = annotation.id;
-                        if shift_held {
-                            app.toggle_select(hit_id);
-                        } else {
-                            app.select_single(hit_id);
+                    if minimap_rect.map_or(false, |r| r.contains(pointer)) {
+                        if let Some(m_img_rect) = minimap_img_rect {
+                            app.pan = pan_from_minimap_click(pointer, m_img_rect, display_size, canvas.size());
                         }
-                    } else if !shift_held {
-                        app.deselect_all();
+                    } else {
+                        let shift_held = ctx.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
+                        let hit = hit_annotation(&app.annotations, image_rect, image_size, pointer);
+
+                        if let Some(annotation) = hit {
+                            let hit_id = annotation.id;
+                            if shift_held {
+                                app.toggle_select(hit_id);
+                            } else {
+                                app.select_single(hit_id);
+                            }
+                        } else if !shift_held {
+                            app.deselect_all();
+                        }
                     }
                 }
             }
@@ -555,13 +609,114 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                 zoom_galley,
                 Color32::WHITE,
             );
+
+            // Minimap Overview Overlay
+            if show_minimap {
+                if let (Some(m_rect), Some(m_img_rect)) = (minimap_rect, minimap_img_rect) {
+                    painter.rect_filled(m_rect, 3.0, Color32::from_black_alpha(225));
+                    painter.rect_stroke(m_rect, 3.0, Stroke::new(1.0_f32, Color32::from_gray(55)));
+
+                    painter.text(
+                        m_rect.min + Vec2::new(6.0, 9.0),
+                        Align2::LEFT_CENTER,
+                        "OVERVIEW",
+                        FontId::monospace(8.0),
+                        MUTED,
+                    );
+                    painter.text(
+                        Pos2::new(m_rect.right() - 6.0, m_rect.min.y + 9.0),
+                        Align2::RIGHT_CENTER,
+                        format!("{:>3.0}%", app.zoom * 100.0),
+                        FontId::monospace(8.0),
+                        RED,
+                    );
+
+                    painter.image(
+                        texture_id,
+                        m_img_rect,
+                        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                    painter.rect_stroke(m_img_rect, 0.0, Stroke::new(1.0_f32, Color32::from_gray(40)));
+
+                    for a in &app.annotations {
+                        let norm_x = (a.x / image_size.x).clamp(0.0, 1.0);
+                        let norm_y = (a.y / image_size.y).clamp(0.0, 1.0);
+                        let norm_w = (a.width / image_size.x).clamp(0.0, 1.0);
+                        let norm_h = (a.height / image_size.y).clamp(0.0, 1.0);
+
+                        let box_min = m_img_rect.min + Vec2::new(norm_x * m_img_rect.width(), norm_y * m_img_rect.height());
+                        let box_max = box_min + Vec2::new(norm_w * m_img_rect.width(), norm_h * m_img_rect.height());
+                        let mini_box = Rect::from_min_max(box_min, box_max);
+
+                        let col = a.color32();
+                        painter.rect_filled(
+                            mini_box,
+                            0.0,
+                            Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), 60),
+                        );
+                        painter.rect_stroke(mini_box, 0.0, Stroke::new(1.0_f32, col));
+                    }
+
+                    let vp_rect = calculate_minimap_viewport(image_rect, canvas, m_img_rect);
+                    painter.rect_filled(
+                        vp_rect,
+                        0.0,
+                        Color32::from_rgba_unmultiplied(255, 59, 48, 45),
+                    );
+                    painter.rect_stroke(vp_rect, 0.0, Stroke::new(1.5_f32, RED));
+                }
+            }
         });
+}
+
+pub fn calculate_minimap_viewport(
+    image_screen_rect: Rect,
+    canvas_rect: Rect,
+    minimap_img_rect: Rect,
+) -> Rect {
+    let visible = image_screen_rect.intersect(canvas_rect);
+    if visible.width() <= 0.0
+        || visible.height() <= 0.0
+        || image_screen_rect.width() <= 0.0
+        || image_screen_rect.height() <= 0.0
+    {
+        return minimap_img_rect;
+    }
+    let norm_min_x = ((visible.left() - image_screen_rect.left()) / image_screen_rect.width()).clamp(0.0, 1.0);
+    let norm_min_y = ((visible.top() - image_screen_rect.top()) / image_screen_rect.height()).clamp(0.0, 1.0);
+    let norm_max_x = ((visible.right() - image_screen_rect.left()) / image_screen_rect.width()).clamp(0.0, 1.0);
+    let norm_max_y = ((visible.bottom() - image_screen_rect.top()) / image_screen_rect.height()).clamp(0.0, 1.0);
+
+    let vp_min = Pos2::new(
+        minimap_img_rect.left() + norm_min_x * minimap_img_rect.width(),
+        minimap_img_rect.top() + norm_min_y * minimap_img_rect.height(),
+    );
+    let vp_max = Pos2::new(
+        minimap_img_rect.left() + norm_max_x * minimap_img_rect.width(),
+        minimap_img_rect.top() + norm_max_y * minimap_img_rect.height(),
+    );
+    Rect::from_min_max(vp_min, vp_max).intersect(minimap_img_rect)
+}
+
+pub fn pan_from_minimap_click(
+    click_pos: Pos2,
+    minimap_img_rect: Rect,
+    display_size: Vec2,
+    canvas_size: Vec2,
+) -> Vec2 {
+    let norm_x = ((click_pos.x - minimap_img_rect.left()) / minimap_img_rect.width()).clamp(0.0, 1.0);
+    let norm_y = ((click_pos.y - minimap_img_rect.top()) / minimap_img_rect.height()).clamp(0.0, 1.0);
+
+    let raw_pan = Vec2::new(0.5 - norm_x, 0.5 - norm_y) * display_size;
+    clamp_pan(raw_pan, canvas_size, display_size)
 }
 
 fn active_drag_start_pointer(drag: &ActiveDrag) -> Pos2 {
     match drag {
         ActiveDrag::Move { start_pointer, .. } => *start_pointer,
         ActiveDrag::Resize { start_pointer, .. } => *start_pointer,
+        ActiveDrag::MinimapPan { start_pointer } => *start_pointer,
     }
 }
 
@@ -623,5 +778,44 @@ mod tests {
         // Click inside parent body but outside child at (50, 50)
         let hit_parent = hit_annotation(&annotations, image_rect, image_size, Pos2::new(50.0, 50.0));
         assert_eq!(hit_parent.map(|a| a.id), Some(1));
+    }
+
+    #[test]
+    fn test_calculate_minimap_viewport() {
+        let canvas = Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::new(800.0, 600.0));
+        // Image centered at (400, 300) with size (1600, 1200) -> image spans (-400..1200, -300..900)
+        let image_rect = Rect::from_center_size(canvas.center(), Vec2::new(1600.0, 1200.0));
+        let minimap_img_rect = Rect::from_min_size(Pos2::new(100.0, 100.0), Vec2::new(160.0, 120.0));
+
+        let vp = calculate_minimap_viewport(image_rect, canvas, minimap_img_rect);
+
+        // Visible portion on screen is (0..800, 0..600), which is center 50% width and 50% height
+        // normalized min: 400/1600 = 0.25, normalized max: 1200/1600 = 0.75
+        // normalized min_y: 300/1200 = 0.25, normalized max_y: 900/1200 = 0.75
+        assert!((vp.left() - 140.0).abs() < 1.0);
+        assert!((vp.top() - 130.0).abs() < 1.0);
+        assert!((vp.width() - 80.0).abs() < 1.0);
+        assert!((vp.height() - 60.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_pan_from_minimap_click() {
+        let canvas_size = Vec2::new(800.0, 600.0);
+        let display_size = Vec2::new(1600.0, 1200.0);
+        let minimap_img_rect = Rect::from_min_size(Pos2::new(100.0, 100.0), Vec2::new(160.0, 120.0));
+
+        // Click center of minimap: (180, 160)
+        let pan_center = pan_from_minimap_click(Pos2::new(180.0, 160.0), minimap_img_rect, display_size, canvas_size);
+        assert!((pan_center.x).abs() < 0.01);
+        assert!((pan_center.y).abs() < 0.01);
+
+        // Click top-left of minimap: (100, 100) -> pans to show top-left of image
+        let pan_tl = pan_from_minimap_click(Pos2::new(100.0, 100.0), minimap_img_rect, display_size, canvas_size);
+        // limit is (1600 - 800) * 0.5 = 400 for x, (1200 - 600) * 0.5 = 300 for y
+        assert_eq!(pan_tl, Vec2::new(400.0, 300.0));
+
+        // Click bottom-right of minimap: (260, 220) -> pans to show bottom-right of image
+        let pan_br = pan_from_minimap_click(Pos2::new(260.0, 220.0), minimap_img_rect, display_size, canvas_size);
+        assert_eq!(pan_br, Vec2::new(-400.0, -300.0));
     }
 }

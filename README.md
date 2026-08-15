@@ -42,6 +42,7 @@ Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` /
 - `Escape` / `Cmd/Ctrl+D` — cancel drawing or deselect all
 - Scroll — zoom toward the cursor
 - `Space` + drag or middle-drag — pan
+- Click / drag on Minimap — pan viewport to any region of zoomed image
 
 ## Export Formats
 

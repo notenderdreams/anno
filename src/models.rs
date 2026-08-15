@@ -24,6 +24,9 @@ pub enum ActiveDrag {
         initial_w: f32,
         initial_h: f32,
     },
+    MinimapPan {
+        start_pointer: Pos2,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
