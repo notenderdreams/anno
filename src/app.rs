@@ -456,20 +456,10 @@ impl AnnotatorApp {
         self.pending_image_idx = None;
         self.auto_save_current_image();
 
-        if let Some(parent) = path.parent() {
-            let needs_rescan = self.dataset_folder.as_deref() != Some(parent);
-            if needs_rescan {
-                self.dataset_folder = Some(parent.to_path_buf());
-                self.image_files = scan_image_folder(parent);
-                self.refresh_annotation_counts();
-            }
-            if let Some(idx) = self.image_files.iter().position(|p| p == &path) {
-                self.current_image_idx = Some(idx);
-            } else {
-                self.image_files.push(path.clone());
-                self.current_image_idx = Some(self.image_files.len() - 1);
-            }
-        }
+        self.dataset_folder = None;
+        self.image_files.clear();
+        self.current_image_idx = None;
+        self.annotation_counts.clear();
 
         self.load_image_internal(ctx, path);
     }
@@ -583,6 +573,10 @@ impl AnnotatorApp {
 
     pub fn load_project(&mut self, ctx: &egui::Context, path: &Path) {
         self.pending_image_idx = None;
+        self.dataset_folder = None;
+        self.image_files.clear();
+        self.current_image_idx = None;
+        self.annotation_counts.clear();
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(error) => {
@@ -1916,5 +1910,22 @@ mod tests {
 
         assert_eq!(app.editing_label, Some(1));
         assert!(app.request_label_focus);
+    }
+
+    #[test]
+    fn test_single_image_mode_does_not_enable_batch_dataset() {
+        let mut app = test_app();
+
+        app.dataset_folder = None;
+        app.image_files.clear();
+        app.current_image_idx = None;
+
+        // When single image is loaded, dataset_folder is None and image_files is empty
+        assert!(app.dataset_folder.is_none());
+        assert!(app.image_files.is_empty());
+        assert!(app.current_image_idx.is_none());
+
+        let is_batch = app.dataset_folder.is_some() || app.image_files.len() > 1;
+        assert!(!is_batch);
     }
 }

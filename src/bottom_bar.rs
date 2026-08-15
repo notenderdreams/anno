@@ -3,8 +3,8 @@ use crate::app::AnnotatorApp;
 use crate::theme::{MUTED, PANEL, RED};
 
 pub fn render_bottom_bar(app: &mut AnnotatorApp, ctx: &egui::Context) {
-    let has_dataset = !app.image_files.is_empty();
-    if !has_dataset {
+    let is_batch = app.dataset_folder.is_some() || app.image_files.len() > 1;
+    if !is_batch {
         return;
     }
 
