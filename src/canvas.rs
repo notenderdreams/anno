@@ -1,10 +1,10 @@
 use eframe::egui::{
-    self, Align2, Color32, CursorIcon, FontId, Key, Margin, PointerButton, Pos2, Rect, Sense, Stroke, Vec2,
+    self, Align2, Color32, CursorIcon, FontId, Key, Margin, PointerButton, Pos2, Rect, RichText, Sense, Stroke, Vec2,
 };
 
 use crate::app::AnnotatorApp;
 use crate::geometry::{annotation_screen_rect, annotation_tag_rect, screen_to_image, update_hierarchy};
-use crate::models::{ActiveDrag, Annotation, Draft, ResizeHandle};
+use crate::models::{match_class_presets, ActiveDrag, Annotation, Draft, ResizeHandle};
 use crate::render::draw_surveillance_box;
 use crate::theme::{BG, MUTED, RED};
 
@@ -569,8 +569,94 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         app.request_label_focus = false;
                     }
 
+                    let suggestions = match_class_presets(&annotation.label, &app.presets);
+                    let mut canvas_applied = None;
+                    let show_canvas_autocomplete = (edit.has_focus() || edit.lost_focus()) && !suggestions.is_empty();
+
+                    if show_canvas_autocomplete {
+                        let max_count = suggestions.len().min(4);
+
+                        if ui.input(|i| i.key_pressed(Key::ArrowDown)) {
+                            app.autocomplete_nav = Some(match app.autocomplete_nav {
+                                Some(curr) => (curr + 1) % max_count,
+                                None => 0,
+                            });
+                        } else if ui.input(|i| i.key_pressed(Key::ArrowUp)) {
+                            app.autocomplete_nav = Some(match app.autocomplete_nav {
+                                Some(curr) => if curr == 0 { max_count - 1 } else { curr - 1 },
+                                None => max_count - 1,
+                            });
+                        }
+
+                        let enter_pressed = ui.input(|i| i.key_pressed(Key::Enter));
+                        let tab_pressed = ui.input(|i| i.key_pressed(Key::Tab));
+
+                        if enter_pressed || tab_pressed {
+                            if let Some(selected_idx) = app.autocomplete_nav {
+                                if let Some((_, preset)) = suggestions.get(selected_idx) {
+                                    let tag = format!("{}_{:02}", preset.prefix, annotation.id);
+                                    canvas_applied = Some((preset.color, tag));
+                                    app.autocomplete_nav = None;
+                                }
+                            } else if tab_pressed {
+                                if let Some((_, preset)) = suggestions.first() {
+                                    let tag = format!("{}_{:02}", preset.prefix, annotation.id);
+                                    canvas_applied = Some((preset.color, tag));
+                                    app.autocomplete_nav = None;
+                                }
+                            }
+                        }
+
+                        if edit.has_focus() {
+                            let popup_w = 160.0_f32.max(edit_width);
+                            let popup_rect = Rect::from_min_size(
+                                Pos2::new(edit_rect.left(), edit_rect.bottom() + 2.0),
+                                Vec2::new(popup_w, (max_count as f32) * 20.0 + 8.0),
+                            );
+                            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(popup_rect), |ui| {
+                                let frame = egui::Frame::none()
+                                    .fill(Color32::from_black_alpha(235))
+                                    .stroke(Stroke::new(1.0_f32, Color32::from_gray(65)))
+                                    .rounding(2.0)
+                                    .inner_margin(Margin::same(3.0));
+                                frame.show(ui, |ui| {
+                                    ui.spacing_mut().item_spacing.y = 2.0;
+                                    for (i, (idx, preset)) in suggestions.iter().take(4).enumerate() {
+                                        let is_highlighted = app.autocomplete_nav == Some(i);
+                                        let tag = format!("{}_{:02}", preset.prefix, annotation.id);
+                                        let arrow_prefix = if is_highlighted { "▶ " } else { "  " };
+                                        let btn = egui::Button::new(
+                                            RichText::new(format!("{}[{}] {}", arrow_prefix, idx + 1, tag))
+                                                .size(9.0)
+                                                .monospace()
+                                                .color(if is_highlighted { Color32::WHITE } else { Color32::from_gray(200) }),
+                                        )
+                                        .fill(if is_highlighted { Color32::from_gray(50) } else { Color32::from_gray(30) })
+                                        .stroke(Stroke::new(if is_highlighted { 1.5_f32 } else { 1.0_f32 }, preset.color32()));
+                                        let resp = ui.add_sized([ui.available_width(), 18.0], btn);
+                                        if resp.hovered() {
+                                            app.autocomplete_nav = Some(i);
+                                        }
+                                        if resp.clicked() {
+                                            canvas_applied = Some((preset.color, tag));
+                                            app.autocomplete_nav = None;
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    }
+
+                    if let Some((col, tag)) = canvas_applied {
+                        annotation.color = col;
+                        annotation.label = tag;
+                        close_editing = true;
+                        app.autocomplete_nav = None;
+                    }
+
                     if edit.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         close_editing = true;
+                        app.autocomplete_nav = None;
                     }
                 }
             }

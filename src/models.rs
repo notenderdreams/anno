@@ -85,6 +85,26 @@ pub fn default_presets() -> Vec<ClassPreset> {
     ]
 }
 
+pub fn match_class_presets<'a>(
+    query: &str,
+    presets: &'a [ClassPreset],
+) -> Vec<(usize, &'a ClassPreset)> {
+    let q = query.trim().to_lowercase();
+    let base_q = q.split('_').next().unwrap_or(&q).trim();
+    presets
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| {
+            if base_q.is_empty() {
+                true
+            } else {
+                let p_lower = p.prefix.to_lowercase();
+                p_lower.starts_with(base_q) || p_lower.contains(base_q)
+            }
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {
     pub image: String,
@@ -202,7 +222,7 @@ pub struct Draft {
 
 #[cfg(test)]
 mod tests {
-    use super::{export_annotation_tree, Annotation, ProjectFile};
+    use super::*;
 
     fn annotation(id: u32, parent_id: Option<u32>) -> Annotation {
         Annotation {
@@ -256,5 +276,31 @@ mod tests {
         let decoded: ProjectFile = serde_json::from_str(&json_str).unwrap();
 
         assert_eq!(project, decoded);
+    }
+
+    #[test]
+    fn test_match_class_presets() {
+        let presets = default_presets();
+
+        // Empty query returns all presets
+        assert_eq!(match_class_presets("", &presets).len(), 9);
+
+        // "pe" matches "person"
+        let matches = match_class_presets("pe", &presets);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].1.prefix, "person");
+
+        // "person_02" matches "person"
+        let matches_tag = match_class_presets("person_02", &presets);
+        assert_eq!(matches_tag.len(), 1);
+        assert_eq!(matches_tag[0].1.prefix, "person");
+
+        // "veh" matches "vehicle"
+        let matches_veh = match_class_presets("veh", &presets);
+        assert_eq!(matches_veh.len(), 1);
+        assert_eq!(matches_veh[0].1.prefix, "vehicle");
+
+        // "nonexistent" matches 0
+        assert_eq!(match_class_presets("nonexistent", &presets).len(), 0);
     }
 }

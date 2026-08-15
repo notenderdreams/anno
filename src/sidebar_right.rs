@@ -1,6 +1,7 @@
 use eframe::egui::{self, Color32, FontFamily, FontId, Margin, Pos2, RichText, Sense, Stroke, Vec2};
 use crate::app::AnnotatorApp;
 use crate::geometry::update_hierarchy;
+use crate::models::match_class_presets;
 use crate::render::draw_lucide_lock;
 use crate::theme::{MUTED, PANEL, RED};
 
@@ -69,7 +70,29 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         });
                     });
                     ui.add_space(8.0);
-                    ui.label(RichText::new("LABEL").size(9.0).color(MUTED));
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("LABEL").size(9.0).color(MUTED));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            egui::ComboBox::from_id_salt("single_label_class_combo")
+                                .selected_text(RichText::new("CLASS LIST ▾").size(9.0).color(MUTED))
+                                .width(105.0)
+                                .show_ui(ui, |ui| {
+                                    for (idx, preset) in app.presets.iter().enumerate() {
+                                        let text = format!("[{}] {}", idx + 1, preset.prefix);
+                                        let is_selected = annotation.color == preset.color;
+                                        let item_resp = ui.selectable_label(
+                                            is_selected,
+                                            RichText::new(text).size(9.5).monospace().color(preset.color32()),
+                                        );
+                                        if item_resp.clicked() {
+                                            annotation.color = preset.color;
+                                            annotation.label = format!("{}_{:02}", preset.prefix, annotation.id);
+                                            edit_committed = true;
+                                        }
+                                    }
+                                });
+                        });
+                    });
 
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut annotation.label)
@@ -85,9 +108,97 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                     if response.gained_focus() {
                         edit_started = true;
+                        app.autocomplete_nav = None;
                     }
-                    if response.lost_focus() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+
+                    let suggestions = match_class_presets(&annotation.label, &app.presets);
+                    let show_autocomplete = (response.has_focus() || response.lost_focus()) && !suggestions.is_empty();
+
+                    if show_autocomplete {
+                        let max_count = suggestions.len().min(4);
+
+                        if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                            app.autocomplete_nav = Some(match app.autocomplete_nav {
+                                Some(curr) => (curr + 1) % max_count,
+                                None => 0,
+                            });
+                        } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                            app.autocomplete_nav = Some(match app.autocomplete_nav {
+                                Some(curr) => if curr == 0 { max_count - 1 } else { curr - 1 },
+                                None => max_count - 1,
+                            });
+                        }
+
+                        let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        let tab_pressed = ui.input(|i| i.key_pressed(egui::Key::Tab));
+
+                        if enter_pressed || tab_pressed {
+                            if let Some(selected_idx) = app.autocomplete_nav {
+                                if let Some((_, preset)) = suggestions.get(selected_idx) {
+                                    annotation.color = preset.color;
+                                    annotation.label = format!("{}_{:02}", preset.prefix, annotation.id);
+                                    edit_committed = true;
+                                    app.autocomplete_nav = None;
+                                }
+                            } else if tab_pressed {
+                                if let Some((_, preset)) = suggestions.first() {
+                                    annotation.color = preset.color;
+                                    annotation.label = format!("{}_{:02}", preset.prefix, annotation.id);
+                                    edit_committed = true;
+                                    app.autocomplete_nav = None;
+                                }
+                            } else if enter_pressed {
+                                edit_committed = true;
+                                app.autocomplete_nav = None;
+                            }
+                        }
+
+                        if response.has_focus() {
+                            ui.add_space(2.0);
+                            let frame = egui::Frame::none()
+                                .fill(Color32::from_gray(24))
+                                .stroke(Stroke::new(1.0_f32, Color32::from_gray(48)))
+                                .rounding(2.0)
+                                .inner_margin(Margin::same(4.0));
+                            frame.show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.y = 2.0;
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("AUTOCOMPLETE").size(8.0).color(MUTED));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        ui.label(RichText::new("↑↓ ↵/Tab").size(8.0).color(Color32::from_gray(100)));
+                                    });
+                                });
+                                for (i, (idx, preset)) in suggestions.iter().take(4).enumerate() {
+                                    let is_highlighted = app.autocomplete_nav == Some(i);
+                                    let suggested_tag = format!("{}_{:02}", preset.prefix, annotation.id);
+                                    let arrow_prefix = if is_highlighted { "▶ " } else { "  " };
+                                    let btn_text = format!("{}[{}] {} → {}", arrow_prefix, idx + 1, preset.prefix, suggested_tag);
+                                    let btn = egui::Button::new(
+                                        RichText::new(btn_text)
+                                            .size(9.5)
+                                            .monospace()
+                                            .color(if is_highlighted { Color32::WHITE } else { Color32::from_gray(200) }),
+                                    )
+                                    .fill(if is_highlighted { Color32::from_gray(45) } else { Color32::from_gray(30) })
+                                    .stroke(Stroke::new(if is_highlighted { 1.5_f32 } else { 1.0_f32 }, preset.color32()));
+                                    let resp = ui.add_sized([ui.available_width(), 20.0], btn);
+                                    if resp.hovered() {
+                                        app.autocomplete_nav = Some(i);
+                                    }
+                                    if resp.clicked() {
+                                        annotation.color = preset.color;
+                                        annotation.label = suggested_tag;
+                                        edit_committed = true;
+                                        app.autocomplete_nav = None;
+                                    }
+                                }
+                            });
+                        }
+                    }
+
+                    if response.lost_focus() && !edit_committed {
                         edit_committed = true;
+                        app.autocomplete_nav = None;
                     }
 
                     ui.add_space(10.0);
@@ -317,7 +428,30 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     });
                 });
                 ui.add_space(8.0);
-                ui.label(RichText::new("SET LABEL (ALL)").size(9.0).color(MUTED));
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("SET LABEL (ALL)").size(9.0).color(MUTED));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        egui::ComboBox::from_id_salt("batch_label_class_combo")
+                            .selected_text(RichText::new("CLASS LIST ▾").size(9.0).color(MUTED))
+                            .width(105.0)
+                            .show_ui(ui, |ui| {
+                                for (idx, preset) in app.presets.iter().enumerate() {
+                                    let text = format!("[{}] {}", idx + 1, preset.prefix);
+                                    let item_resp = ui.selectable_label(
+                                        false,
+                                        RichText::new(text).size(9.5).monospace().color(preset.color32()),
+                                    );
+                                    if item_resp.clicked() {
+                                        for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id) && !a.locked) {
+                                            a.color = preset.color;
+                                            a.label = format!("{}_{:02}", preset.prefix, a.id);
+                                        }
+                                        edit_committed = true;
+                                    }
+                                }
+                            });
+                    });
+                });
 
                 let first_id = *app.selected.iter().next().unwrap();
                 let all_same_label = {
@@ -347,14 +481,102 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                 if response.gained_focus() {
                     edit_started = true;
+                    app.autocomplete_nav = None;
                 }
-                if response.changed() {
-                    for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id)) {
-                        a.label = batch_label.clone();
+
+                let batch_suggestions = match_class_presets(&batch_label, &app.presets);
+                let show_batch_autocomplete = (response.has_focus() || response.lost_focus()) && !batch_suggestions.is_empty();
+
+                if show_batch_autocomplete {
+                    let max_count = batch_suggestions.len().min(4);
+
+                    if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                        app.autocomplete_nav = Some(match app.autocomplete_nav {
+                            Some(curr) => (curr + 1) % max_count,
+                            None => 0,
+                        });
+                    } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                        app.autocomplete_nav = Some(match app.autocomplete_nav {
+                            Some(curr) => if curr == 0 { max_count - 1 } else { curr - 1 },
+                            None => max_count - 1,
+                        });
+                    }
+
+                    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let tab_pressed = ui.input(|i| i.key_pressed(egui::Key::Tab));
+
+                    if enter_pressed || tab_pressed {
+                        if let Some(selected_idx) = app.autocomplete_nav {
+                            if let Some((_, preset)) = batch_suggestions.get(selected_idx) {
+                                for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id) && !a.locked) {
+                                    a.color = preset.color;
+                                    a.label = format!("{}_{:02}", preset.prefix, a.id);
+                                }
+                                edit_committed = true;
+                                app.autocomplete_nav = None;
+                            }
+                        } else if tab_pressed {
+                            if let Some((_, preset)) = batch_suggestions.first() {
+                                for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id) && !a.locked) {
+                                    a.color = preset.color;
+                                    a.label = format!("{}_{:02}", preset.prefix, a.id);
+                                }
+                                edit_committed = true;
+                                app.autocomplete_nav = None;
+                            }
+                        } else if enter_pressed {
+                            edit_committed = true;
+                            app.autocomplete_nav = None;
+                        }
+                    }
+
+                    if response.has_focus() {
+                        ui.add_space(2.0);
+                        let frame = egui::Frame::none()
+                            .fill(Color32::from_gray(24))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_gray(48)))
+                            .rounding(2.0)
+                            .inner_margin(Margin::same(4.0));
+                        frame.show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("AUTOCOMPLETE").size(8.0).color(MUTED));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.label(RichText::new("↑↓ ↵/Tab").size(8.0).color(Color32::from_gray(100)));
+                                });
+                            });
+                            for (i, (idx, preset)) in batch_suggestions.iter().take(4).enumerate() {
+                                let is_highlighted = app.autocomplete_nav == Some(i);
+                                let arrow_prefix = if is_highlighted { "▶ " } else { "  " };
+                                let btn_text = format!("{}[{}] {} (APPLY TO ALL)", arrow_prefix, idx + 1, preset.prefix);
+                                let btn = egui::Button::new(
+                                    RichText::new(btn_text)
+                                        .size(9.5)
+                                        .monospace()
+                                        .color(if is_highlighted { Color32::WHITE } else { Color32::from_gray(200) }),
+                                )
+                                .fill(if is_highlighted { Color32::from_gray(45) } else { Color32::from_gray(30) })
+                                .stroke(Stroke::new(if is_highlighted { 1.5_f32 } else { 1.0_f32 }, preset.color32()));
+                                let resp = ui.add_sized([ui.available_width(), 20.0], btn);
+                                if resp.hovered() {
+                                    app.autocomplete_nav = Some(i);
+                                }
+                                if resp.clicked() {
+                                    for a in app.annotations.iter_mut().filter(|a| app.selected.contains(&a.id) && !a.locked) {
+                                        a.color = preset.color;
+                                        a.label = format!("{}_{:02}", preset.prefix, a.id);
+                                    }
+                                    edit_committed = true;
+                                    app.autocomplete_nav = None;
+                                }
+                            }
+                        });
                     }
                 }
-                if response.lost_focus() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+
+                if response.lost_focus() && !edit_committed {
                     edit_committed = true;
+                    app.autocomplete_nav = None;
                 }
 
                 ui.add_space(10.0);

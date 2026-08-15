@@ -69,6 +69,7 @@ pub struct AnnotatorApp {
     pub loader: BackgroundLoader,
     pub presets: Vec<ClassPreset>,
     pub active_preset_idx: usize,
+    pub autocomplete_nav: Option<usize>,
 }
 
 impl AnnotatorApp {
@@ -102,6 +103,7 @@ impl AnnotatorApp {
             loader: BackgroundLoader::new(),
             presets: default_presets(),
             active_preset_idx: 0,
+            autocomplete_nav: None,
         }
     }
 
@@ -1284,7 +1286,7 @@ impl eframe::App for AnnotatorApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::BatchProjectFile;
+    use crate::models::{match_class_presets, BatchProjectFile};
     use std::path::PathBuf;
 
     fn test_app() -> AnnotatorApp {
@@ -1316,6 +1318,7 @@ mod tests {
             loader: BackgroundLoader::new(),
             presets: default_presets(),
             active_preset_idx: 0,
+            autocomplete_nav: None,
         }
     }
 
@@ -1848,5 +1851,38 @@ mod tests {
         // Unlocked annotation 2 is updated
         assert_eq!(app.annotations[1].label, "person_02");
         assert_eq!(app.annotations[1].color, [41, 121, 255]);
+    }
+
+    #[test]
+    fn test_autocomplete_navigation_and_selection() {
+        let mut app = test_app();
+        let mut a = sample_annotation(1);
+        a.label = "pe".to_string();
+        app.annotations = vec![a];
+        app.selected.insert(1);
+
+        let suggestions = match_class_presets(&app.annotations[0].label, &app.presets);
+        assert!(!suggestions.is_empty());
+        assert_eq!(suggestions[0].1.prefix, "person");
+
+        // Simulate Down arrow navigation
+        let max_count = suggestions.len().min(4);
+        app.autocomplete_nav = Some(match app.autocomplete_nav {
+            Some(curr) => (curr + 1) % max_count,
+            None => 0,
+        });
+        assert_eq!(app.autocomplete_nav, Some(0));
+
+        // Simulate Enter selection
+        if let Some(idx) = app.autocomplete_nav {
+            let (_, preset) = suggestions[idx];
+            app.annotations[0].color = preset.color;
+            app.annotations[0].label = format!("{}_{:02}", preset.prefix, app.annotations[0].id);
+            app.autocomplete_nav = None;
+        }
+
+        assert_eq!(app.annotations[0].label, "person_01");
+        assert_eq!(app.annotations[0].color, [41, 121, 255]);
+        assert_eq!(app.autocomplete_nav, None);
     }
 }
