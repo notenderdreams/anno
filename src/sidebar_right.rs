@@ -101,7 +101,7 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             .margin(Vec2::new(8.0, 7.0)),
                     );
 
-                    if app.request_label_focus {
+                    if app.request_label_focus && app.editing_label.is_none() {
                         response.request_focus();
                         app.request_label_focus = false;
                     }

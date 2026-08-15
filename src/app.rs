@@ -1163,7 +1163,7 @@ impl AnnotatorApp {
     }
 
     pub fn shortcuts_and_drops(&mut self, ctx: &egui::Context) {
-        let (open_img, open_folder, open_proj, save_proj, export_json, export_dataset, undo, redo, delete, prev_img, next_img, escape, select_all, deselect, toggle_lock, dropped) = ctx.input(|input| {
+        let (open_img, open_folder, open_proj, save_proj, export_json, export_dataset, undo, redo, delete, prev_img, next_img, escape, select_all, deselect, toggle_lock, enter, dropped) = ctx.input(|input| {
             let cmd_or_ctrl = input.modifiers.command || input.modifiers.ctrl;
             let shift = input.modifiers.shift;
             let alt = input.modifiers.alt;
@@ -1186,6 +1186,7 @@ impl AnnotatorApp {
                 cmd_or_ctrl && !shift && !alt && input.key_pressed(Key::A),
                 cmd_or_ctrl && !shift && !alt && input.key_pressed(Key::D),
                 cmd_or_ctrl && !shift && !alt && input.key_pressed(Key::L),
+                !cmd_or_ctrl && !shift && !alt && input.key_pressed(Key::Enter),
                 input.raw.dropped_files.clone(),
             )
         });
@@ -1231,6 +1232,15 @@ impl AnnotatorApp {
         if !ctx.wants_keyboard_input() {
             if let Some(idx) = digit_preset {
                 self.apply_preset(idx);
+            } else if enter && self.selected.len() == 1 {
+                let id = *self.selected.iter().next().unwrap();
+                let is_locked = self.annotations.iter().find(|a| a.id == id).map_or(false, |a| a.locked);
+                if !is_locked {
+                    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                    self.history.begin_edit(self.current_snapshot());
+                    self.editing_label = Some(id);
+                    self.request_label_focus = true;
+                }
             } else if redo {
                 self.redo();
             } else if undo {
@@ -1884,5 +1894,27 @@ mod tests {
         assert_eq!(app.annotations[0].label, "person_01");
         assert_eq!(app.annotations[0].color, [41, 121, 255]);
         assert_eq!(app.autocomplete_nav, None);
+    }
+
+    #[test]
+    fn test_enter_shortcut_renames_single_selected_annotation() {
+        let mut app = test_app();
+        app.annotations = vec![sample_annotation(1), sample_annotation(2)];
+        app.selected.insert(1);
+
+        // Verify single selection
+        assert_eq!(app.selected.len(), 1);
+        let id = *app.selected.iter().next().unwrap();
+        assert_eq!(id, 1);
+
+        // Simulate Enter shortcut behavior
+        let is_locked = app.annotations.iter().find(|a| a.id == id).map_or(false, |a| a.locked);
+        assert!(!is_locked);
+        app.history.begin_edit(app.current_snapshot());
+        app.editing_label = Some(id);
+        app.request_label_focus = true;
+
+        assert_eq!(app.editing_label, Some(1));
+        assert!(app.request_label_focus);
     }
 }

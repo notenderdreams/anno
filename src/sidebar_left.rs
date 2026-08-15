@@ -436,6 +436,14 @@ fn render_tree_branch(
 
     if lock_clicked {
         app.toggle_lock_annotation(annotation_id);
+    } else if response.double_clicked() {
+        let is_locked = app.annotations.iter().find(|a| a.id == annotation_id).map_or(false, |a| a.locked);
+        if !is_locked {
+            app.select_single(annotation_id);
+            app.history.begin_edit(app.current_snapshot());
+            app.editing_label = Some(annotation_id);
+            app.request_label_focus = true;
+        }
     } else if response.clicked() {
         let modifier = ui.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
         if modifier {

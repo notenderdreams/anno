@@ -654,7 +654,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         app.autocomplete_nav = None;
                     }
 
-                    if edit.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if !edit.gained_focus() && (edit.lost_focus() || (edit.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))) {
                         close_editing = true;
                         app.autocomplete_nav = None;
                     }
