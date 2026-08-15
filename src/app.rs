@@ -9,9 +9,9 @@ use crate::geometry::update_hierarchy;
 use crate::history::{AppSnapshot, History};
 use crate::menubar::{handle_native_menu_events, NativeMenuBar};
 use crate::models::{
-    default_presets, export_annotation_tree, ActiveDrag, Annotation, AnnotationFile,
-    BatchProjectFile, ClassPreset, Draft, LoadedImage, ProjectFile, UnifiedDatasetExport,
-    UnifiedImageExport,
+    assign_preset_to_annotations, default_presets, export_annotation_tree,
+    ActiveDrag, Annotation, AnnotationFile, BatchProjectFile, ClassPreset, Draft, LoadedImage,
+    ProjectFile, UnifiedDatasetExport, UnifiedImageExport,
 };
 use crate::sidebar_left::render_left_sidebar;
 use crate::sidebar_right::render_right_sidebar;
@@ -120,12 +120,7 @@ impl AnnotatorApp {
 
         if !self.selected.is_empty() {
             self.history.record(self.current_snapshot());
-            let mut count = 0;
-            for a in self.annotations.iter_mut().filter(|a| self.selected.contains(&a.id) && !a.locked) {
-                a.color = preset.color;
-                a.label = format!("{}_{:02}", preset.prefix, a.id);
-                count += 1;
-            }
+            let count = assign_preset_to_annotations(&mut self.annotations, &self.selected, &preset);
             let prefix_upper = preset.prefix.to_uppercase();
             self.status = format!("PRESET {}: {} APPLIED TO {} REGION(S)", idx + 1, prefix_upper, count);
         } else {
@@ -1290,7 +1285,7 @@ impl eframe::App for AnnotatorApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{match_class_presets, BatchProjectFile};
+    use crate::models::{match_class_presets, next_category_label, BatchProjectFile};
     use std::path::PathBuf;
 
     fn test_app() -> AnnotatorApp {
@@ -1852,8 +1847,8 @@ mod tests {
         assert_eq!(app.annotations[0].label, "region_1");
         assert_eq!(app.annotations[0].color, [255, 0, 0]);
 
-        // Unlocked annotation 2 is updated
-        assert_eq!(app.annotations[1].label, "person_02");
+        // Unlocked annotation 2 is updated with first category number
+        assert_eq!(app.annotations[1].label, "person_01");
         assert_eq!(app.annotations[1].color, [41, 121, 255]);
     }
 
@@ -1881,7 +1876,7 @@ mod tests {
         if let Some(idx) = app.autocomplete_nav {
             let (_, preset) = suggestions[idx];
             app.annotations[0].color = preset.color;
-            app.annotations[0].label = format!("{}_{:02}", preset.prefix, app.annotations[0].id);
+            app.annotations[0].label = next_category_label(&preset.prefix, &app.annotations, Some(app.annotations[0].id));
             app.autocomplete_nav = None;
         }
 

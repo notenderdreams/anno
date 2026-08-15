@@ -4,7 +4,10 @@ use eframe::egui::{
 
 use crate::app::AnnotatorApp;
 use crate::geometry::{annotation_screen_rect, annotation_tag_rect, screen_to_image, update_hierarchy};
-use crate::models::{match_class_presets, ActiveDrag, Annotation, Draft, ResizeHandle};
+use crate::models::{
+    match_class_presets, next_category_label, next_category_label_from_labels, ActiveDrag,
+    Annotation, Draft, ResizeHandle,
+};
 use crate::render::draw_surveillance_box;
 use crate::theme::{BG, MUTED, RED};
 
@@ -465,11 +468,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             ("object".to_string(), [255, 0, 0])
                         };
 
-                        let label = if prefix.trim().is_empty() {
-                            format!("object_{id:02}")
-                        } else {
-                            format!("{prefix}_{id:02}")
-                        };
+                        let label = next_category_label(&prefix, &app.annotations, None);
 
                         app.annotations.push(Annotation {
                             id,
@@ -533,6 +532,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
             let editing_id = app.editing_label;
             let selected_ids = app.selected.clone();
+            let other_labels: Vec<(u32, String)> = app.annotations.iter().map(|a| (a.id, a.label.clone())).collect();
             let mut close_editing = false;
 
             for annotation in &mut app.annotations {
@@ -594,13 +594,19 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         if enter_pressed || tab_pressed {
                             if let Some(selected_idx) = app.autocomplete_nav {
                                 if let Some((_, preset)) = suggestions.get(selected_idx) {
-                                    let tag = format!("{}_{:02}", preset.prefix, annotation.id);
+                                    let tag = next_category_label_from_labels(
+                                        &preset.prefix,
+                                        other_labels.iter().filter(|(id, _)| *id != annotation.id).map(|(_, l)| l.as_str()),
+                                    );
                                     canvas_applied = Some((preset.color, tag));
                                     app.autocomplete_nav = None;
                                 }
                             } else if tab_pressed {
                                 if let Some((_, preset)) = suggestions.first() {
-                                    let tag = format!("{}_{:02}", preset.prefix, annotation.id);
+                                    let tag = next_category_label_from_labels(
+                                        &preset.prefix,
+                                        other_labels.iter().filter(|(id, _)| *id != annotation.id).map(|(_, l)| l.as_str()),
+                                    );
                                     canvas_applied = Some((preset.color, tag));
                                     app.autocomplete_nav = None;
                                 }
@@ -623,7 +629,10 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     ui.spacing_mut().item_spacing.y = 2.0;
                                     for (i, (idx, preset)) in suggestions.iter().take(4).enumerate() {
                                         let is_highlighted = app.autocomplete_nav == Some(i);
-                                        let tag = format!("{}_{:02}", preset.prefix, annotation.id);
+                                        let tag = next_category_label_from_labels(
+                                            &preset.prefix,
+                                            other_labels.iter().filter(|(id, _)| *id != annotation.id).map(|(_, l)| l.as_str()),
+                                        );
                                         let arrow_prefix = if is_highlighted { "▶ " } else { "  " };
                                         let btn = egui::Button::new(
                                             RichText::new(format!("{}[{}] {}", arrow_prefix, idx + 1, tag))
@@ -667,12 +676,12 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
             }
 
             if let Some(draft) = &app.draft {
-                let (prefix, color) = if let Some(preset) = app.presets.get(app.active_preset_idx) {
-                    (preset.prefix.to_uppercase(), preset.color32())
+                let (draft_label, color) = if let Some(preset) = app.presets.get(app.active_preset_idx) {
+                    let seq_label = next_category_label(&preset.prefix, &app.annotations, None);
+                    (seq_label.to_uppercase(), preset.color32())
                 } else {
-                    ("NEW REGION".to_string(), RED)
+                    (format!("REGION {:02}", app.next_id), RED)
                 };
-                let draft_label = format!("{prefix} {:02}", app.next_id);
                 draw_surveillance_box(
                     &painter,
                     Rect::from_two_pos(draft.start, draft.current),

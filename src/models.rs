@@ -85,6 +85,8 @@ pub fn default_presets() -> Vec<ClassPreset> {
     ]
 }
 
+use std::collections::HashSet;
+
 pub fn match_class_presets<'a>(
     query: &str,
     presets: &'a [ClassPreset],
@@ -103,6 +105,95 @@ pub fn match_class_presets<'a>(
             }
         })
         .collect()
+}
+
+pub fn next_category_label_from_labels<'a, I>(prefix: &str, labels: I) -> String
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let clean_prefix = prefix.trim();
+    if clean_prefix.is_empty() {
+        return "object_01".to_string();
+    }
+
+    let prefix_lower = clean_prefix.to_lowercase();
+    let prefix_underscore = format!("{prefix_lower}_");
+
+    let mut max_seq: usize = 0;
+    let mut count: usize = 0;
+
+    for label in labels {
+        let label_lower = label.trim().to_lowercase();
+        if label_lower == prefix_lower {
+            count += 1;
+            max_seq = max_seq.max(1);
+        } else if let Some(suffix) = label_lower.strip_prefix(&prefix_underscore) {
+            count += 1;
+            if let Ok(num) = suffix.parse::<usize>() {
+                max_seq = max_seq.max(num);
+            }
+        }
+    }
+
+    let next_num = max_seq.max(count) + 1;
+    format!("{clean_prefix}_{:02}", next_num)
+}
+
+pub fn next_category_label(
+    prefix: &str,
+    annotations: &[Annotation],
+    exclude_id: Option<u32>,
+) -> String {
+    next_category_label_from_labels(
+        prefix,
+        annotations
+            .iter()
+            .filter(|a| exclude_id != Some(a.id))
+            .map(|a| a.label.as_str()),
+    )
+}
+
+pub fn assign_preset_to_annotations(
+    annotations: &mut [Annotation],
+    selected_ids: &HashSet<u32>,
+    preset: &ClassPreset,
+) -> usize {
+    let clean_prefix = preset.prefix.trim();
+    let prefix_lower = clean_prefix.to_lowercase();
+    let prefix_underscore = format!("{prefix_lower}_");
+
+    let mut max_seq: usize = 0;
+    let mut count: usize = 0;
+
+    for a in annotations.iter() {
+        if selected_ids.contains(&a.id) || a.locked {
+            continue;
+        }
+        let label_lower = a.label.trim().to_lowercase();
+        if label_lower == prefix_lower {
+            count += 1;
+            max_seq = max_seq.max(1);
+        } else if let Some(suffix) = label_lower.strip_prefix(&prefix_underscore) {
+            count += 1;
+            if let Ok(num) = suffix.parse::<usize>() {
+                max_seq = max_seq.max(num);
+            }
+        }
+    }
+
+    let mut next_num = max_seq.max(count) + 1;
+    let mut modified = 0;
+
+    for a in annotations.iter_mut() {
+        if selected_ids.contains(&a.id) && !a.locked {
+            a.color = preset.color;
+            a.label = format!("{clean_prefix}_{:02}", next_num);
+            next_num += 1;
+            modified += 1;
+        }
+    }
+
+    modified
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -302,5 +393,60 @@ mod tests {
 
         // "nonexistent" matches 0
         assert_eq!(match_class_presets("nonexistent", &presets).len(), 0);
+    }
+
+    #[test]
+    fn test_next_category_label() {
+        let mut annotations = Vec::new();
+
+        // 1st person
+        assert_eq!(next_category_label("person", &annotations, None), "person_01");
+
+        let mut a1 = annotation(1, None);
+        a1.label = "person_01".to_string();
+        annotations.push(a1);
+
+        // 2nd person
+        assert_eq!(next_category_label("person", &annotations, None), "person_02");
+
+        // 1st vehicle (independent count from person)
+        assert_eq!(next_category_label("vehicle", &annotations, None), "vehicle_01");
+
+        let mut a2 = annotation(2, None);
+        a2.label = "vehicle_01".to_string();
+        annotations.push(a2);
+
+        // 3rd person
+        let mut a3 = annotation(3, None);
+        a3.label = "person_02".to_string();
+        annotations.push(a3);
+
+        assert_eq!(next_category_label("person", &annotations, None), "person_03");
+
+        // Changing a2 (id: 2) from vehicle_01 to person: next person should be person_03
+        assert_eq!(next_category_label("person", &annotations, Some(2)), "person_03");
+    }
+
+    #[test]
+    fn test_assign_preset_to_annotations() {
+        let mut annotations = vec![
+            annotation(1, None),
+            annotation(2, None),
+            annotation(3, None),
+        ];
+
+        let preset = ClassPreset::new("item", [255, 145, 0]);
+        let mut selected = HashSet::new();
+        selected.insert(1);
+        selected.insert(3);
+
+        let modified = assign_preset_to_annotations(&mut annotations, &selected, &preset);
+        assert_eq!(modified, 2);
+        assert_eq!(annotations[0].label, "item_01");
+        assert_eq!(annotations[0].color, [255, 145, 0]);
+        assert_eq!(annotations[2].label, "item_02");
+        assert_eq!(annotations[2].color, [255, 145, 0]);
+        // Annotation 2 was not selected
+        assert_eq!(annotations[1].label, "Region 2");
     }
 }
