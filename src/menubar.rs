@@ -11,6 +11,8 @@ pub struct NativeMenuBar {
     pub open_project: MenuItem,
     pub save_project: MenuItem,
     pub export_json: MenuItem,
+    pub undo: MenuItem,
+    pub redo: MenuItem,
     pub delete_region: MenuItem,
     pub deselect: MenuItem,
     pub reset_view: MenuItem,
@@ -81,6 +83,21 @@ impl NativeMenuBar {
         ]);
 
         // 3. Edit Menu
+        let undo = MenuItem::with_id(
+            "undo",
+            "Undo",
+            false,
+            Some(Accelerator::new(Some(Modifiers::SUPER), Code::KeyZ)),
+        );
+        let redo = MenuItem::with_id(
+            "redo",
+            "Redo",
+            false,
+            Some(Accelerator::new(
+                Some(Modifiers::SUPER | Modifiers::SHIFT),
+                Code::KeyZ,
+            )),
+        );
         let delete_region = MenuItem::with_id(
             "delete_region",
             "Delete Selected Region",
@@ -96,8 +113,8 @@ impl NativeMenuBar {
 
         let edit_menu = Submenu::new("Edit", true);
         let _ = edit_menu.append_items(&[
-            &PredefinedMenuItem::undo(None),
-            &PredefinedMenuItem::redo(None),
+            &undo,
+            &redo,
             &PredefinedMenuItem::separator(),
             &PredefinedMenuItem::cut(None),
             &PredefinedMenuItem::copy(None),
@@ -153,6 +170,8 @@ impl NativeMenuBar {
             open_project,
             save_project,
             export_json,
+            undo,
+            redo,
             delete_region,
             deselect,
             reset_view,
@@ -161,12 +180,21 @@ impl NativeMenuBar {
         }
     }
 
-    pub fn update_states(&self, has_image: bool, has_selection: bool) {
+    pub fn update_states(
+        &self,
+        has_image: bool,
+        has_selection: bool,
+        can_undo: bool,
+        can_redo: bool,
+    ) {
         let _ = self.save_project.set_enabled(has_image);
         let _ = self.export_json.set_enabled(has_image);
         let _ = self.reset_view.set_enabled(has_image);
         let _ = self.zoom_in.set_enabled(has_image);
         let _ = self.zoom_out.set_enabled(has_image);
+
+        let _ = self.undo.set_enabled(can_undo);
+        let _ = self.redo.set_enabled(can_redo);
 
         let _ = self.delete_region.set_enabled(has_selection);
         let _ = self.deselect.set_enabled(has_selection);
@@ -175,7 +203,12 @@ impl NativeMenuBar {
 
 pub fn handle_native_menu_events(app: &mut AnnotatorApp, ctx: &egui::Context) {
     if let Some(menubar) = &app.native_menubar {
-        menubar.update_states(app.image.is_some(), app.selected.is_some());
+        menubar.update_states(
+            app.image.is_some(),
+            app.selected.is_some(),
+            app.can_undo(),
+            app.can_redo(),
+        );
     }
 
     while let Ok(event) = MenuEvent::receiver().try_recv() {
@@ -184,6 +217,8 @@ pub fn handle_native_menu_events(app: &mut AnnotatorApp, ctx: &egui::Context) {
             "open_project" => app.open_project_dialog(ctx),
             "save_project" => app.save_project_dialog(),
             "export_json" => app.export_dialog(),
+            "undo" => app.undo(),
+            "redo" => app.redo(),
             "delete_region" => app.delete_selected(),
             "deselect" => {
                 app.selected = None;

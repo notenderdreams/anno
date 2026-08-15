@@ -163,6 +163,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         annotation_tag_rect(annotation, image_rect, image_size).contains(pointer)
                             || annotation_screen_rect(annotation, image_rect, image_size).contains(pointer)
                     }) {
+                        app.history.begin_edit(app.current_snapshot());
                         app.selected = Some(hit.id);
                         app.editing_label = Some(hit.id);
                         app.request_label_focus = true;
@@ -178,6 +179,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id) {
                             let rect = annotation_screen_rect(annotation, image_rect, image_size);
                             if let Some(handle) = hit_resize_handle(rect, pointer) {
+                                app.history.begin_edit(app.current_snapshot());
                                 app.active_drag = Some(ActiveDrag::Resize {
                                     id: selected_id,
                                     handle,
@@ -204,6 +206,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                         if let Some((id, x, y)) = hit_tag {
                             app.selected = Some(id);
+                            app.history.begin_edit(app.current_snapshot());
                             app.active_drag = Some(ActiveDrag::Move {
                                 id,
                                 start_pointer: pointer,
@@ -255,7 +258,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                 if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == *id) {
                                     match handle {
                                         ResizeHandle::TopLeft => {
-                                            let new_x = (initial_x + delta_x).clamp(0.0, initial_x + initial_w - 8.0);
+                                             let new_x = (initial_x + delta_x).clamp(0.0, initial_x + initial_w - 8.0);
                                             let new_y = (initial_y + delta_y).clamp(0.0, initial_y + initial_h - 8.0);
                                             annotation.x = new_x.round();
                                             annotation.y = new_y.round();
@@ -293,11 +296,16 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
             }
 
             if response.drag_stopped_by(PointerButton::Primary) {
-                app.active_drag = None;
+                if app.active_drag.is_some() {
+                    app.active_drag = None;
+                    app.history.commit_edit(&app.current_snapshot());
+                }
                 if let Some(draft) = app.draft.take() {
                     let rect = Rect::from_two_pos(draft.start, draft.current);
 
                     if rect.width() >= 8.0 && rect.height() >= 8.0 {
+                        app.history.record(app.current_snapshot());
+
                         let min = screen_to_image(rect.min, image_rect, image_size);
                         let max = screen_to_image(rect.max, image_rect, image_size);
 
@@ -383,6 +391,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
             if close_editing {
                 app.editing_label = None;
+                app.history.commit_edit(&app.current_snapshot());
             }
 
             if let Some(draft) = &app.draft {

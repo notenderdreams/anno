@@ -12,6 +12,10 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
         .map(|img| (img.width as f32, img.height as f32))
         .unwrap_or((10000.0, 10000.0));
 
+    let mut edit_started = false;
+    let mut edit_committed = false;
+    let mut picked_color = None;
+
     egui::SidePanel::right("right_sidebar")
         .exact_width(240.0)
         .resizable(false)
@@ -48,6 +52,13 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         app.request_label_focus = false;
                     }
 
+                    if response.gained_focus() {
+                        edit_started = true;
+                    }
+                    if response.lost_focus() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                        edit_committed = true;
+                    }
+
                     ui.add_space(10.0);
                     ui.label(RichText::new("DESCRIPTION").size(9.0).color(MUTED));
                     ui.add_space(4.0);
@@ -60,12 +71,18 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             .desired_rows(3)
                             .margin(Vec2::new(8.0, 7.0)),
                     );
+                    if desc_response.gained_focus() {
+                        edit_started = true;
+                    }
                     if desc_response.changed() {
                         annotation.description = if desc.trim().is_empty() {
                             None
                         } else {
                             Some(desc)
                         };
+                    }
+                    if desc_response.lost_focus() {
+                        edit_committed = true;
                     }
 
                     ui.add_space(12.0);
@@ -104,8 +121,8 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     );
                                 }
                             }
-                            if response.clicked() {
-                                annotation.color = rgb;
+                            if response.clicked() && annotation.color != rgb {
+                                picked_color = Some(rgb);
                             }
                         }
 
@@ -131,6 +148,7 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                         let popup_id = ui.make_persistent_id("custom_color_picker_popup");
                         if picker_response.clicked() {
+                            edit_started = true;
                             ui.memory_mut(|mem| mem.toggle_popup(popup_id));
                         }
 
@@ -148,6 +166,7 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                     egui::color_picker::Alpha::Opaque,
                                 ) {
                                     annotation.color = [color32.r(), color32.g(), color32.b()];
+                                    edit_started = true;
                                 }
                             },
                         );
@@ -166,20 +185,22 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         .num_columns(2)
                         .spacing([12.0, 6.0])
                         .show(ui, |ui| {
-                            if bound_field(ui, "X", &mut annotation.x, 0.0, max_x) {
-                                bounds_changed = true;
-                            }
-                            if bound_field(ui, "Y", &mut annotation.y, 0.0, max_y) {
-                                bounds_changed = true;
-                            }
+                            let (x_ch, x_start, x_stop) = bound_field(ui, "X", &mut annotation.x, 0.0, max_x);
+                            let (y_ch, y_start, y_stop) = bound_field(ui, "Y", &mut annotation.y, 0.0, max_y);
                             ui.end_row();
-                            if bound_field(ui, "W", &mut annotation.width, 8.0, max_w) {
-                                bounds_changed = true;
-                            }
-                            if bound_field(ui, "H", &mut annotation.height, 8.0, max_h) {
-                                bounds_changed = true;
-                            }
+                            let (w_ch, w_start, w_stop) = bound_field(ui, "W", &mut annotation.width, 8.0, max_w);
+                            let (h_ch, h_start, h_stop) = bound_field(ui, "H", &mut annotation.height, 8.0, max_h);
                             ui.end_row();
+
+                            if x_ch || y_ch || w_ch || h_ch {
+                                bounds_changed = true;
+                            }
+                            if x_start || y_start || w_start || h_start {
+                                edit_started = true;
+                            }
+                            if x_stop || y_stop || w_stop || h_stop {
+                                edit_committed = true;
+                            }
                         });
 
                     ui.add_space(16.0);
@@ -193,6 +214,21 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
                 if bounds_changed {
                     update_hierarchy(&mut app.annotations);
+                }
+
+                if let Some(color) = picked_color {
+                    app.history.record(app.current_snapshot());
+                    if let Some(annotation) = app.annotations.iter_mut().find(|a| a.id == selected_id) {
+                        annotation.color = color;
+                    }
+                }
+
+                if edit_started {
+                    app.history.begin_edit(app.current_snapshot());
+                }
+
+                if edit_committed {
+                    app.history.commit_edit(&app.current_snapshot());
                 }
 
                 if should_delete {
@@ -225,7 +261,7 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             [ui.available_width(), 32.0],
                             egui::Button::new(
                                 RichText::new("EXPORT JSON")
-                                    .size(10.0)
+                                     .size(10.0)
                                     .strong()
                                     .color(Color32::BLACK),
                             )
@@ -247,8 +283,10 @@ fn bound_field(
     val: &mut f32,
     min: f32,
     max: f32,
-) -> bool {
+) -> (bool, bool, bool) {
     let mut changed = false;
+    let mut started = false;
+    let mut stopped = false;
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
@@ -267,6 +305,10 @@ fn bound_field(
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
         }
 
+        if label_response.drag_started() {
+            started = true;
+        }
+
         if label_response.dragged() {
             let delta = ui.input(|i| i.pointer.delta().x);
             if delta != 0.0 {
@@ -276,16 +318,29 @@ fn bound_field(
             }
         }
 
+        if label_response.drag_stopped() {
+            stopped = true;
+        }
+
         let drag_val = egui::DragValue::new(val)
             .speed(1.0)
             .range(min..=max);
 
         let drag_response = ui.add(drag_val);
+
+        if drag_response.drag_started() || drag_response.gained_focus() {
+            started = true;
+        }
+
         if drag_response.changed() {
             *val = val.round();
             changed = true;
         }
+
+        if drag_response.drag_stopped() || drag_response.lost_focus() {
+            stopped = true;
+        }
     });
 
-    changed
+    (changed, started, stopped)
 }

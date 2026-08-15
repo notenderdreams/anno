@@ -1,6 +1,7 @@
 pub mod app;
 pub mod canvas;
 pub mod geometry;
+pub mod history;
 pub mod menubar;
 pub mod models;
 pub mod render;

@@ -18,7 +18,10 @@ edit its label and color.
 ## Controls
 
 - `Cmd/Ctrl+O` — open an image
-- `Cmd/Ctrl+S` — export annotations
+- `Cmd/Ctrl+S` — save project (.anno)
+- `Cmd/Ctrl+E` — export annotations JSON
+- `Cmd/Ctrl+Z` — undo
+- `Cmd/Ctrl+Shift+Z` / `Cmd/Ctrl+Y` — redo
 - `Delete` / `Backspace` — remove the selected region
 - `Escape` — cancel drawing or deselect
 - Scroll — zoom toward the cursor

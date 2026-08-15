@@ -3,6 +3,7 @@ use eframe::egui::{self, Key};
 
 use crate::canvas::render_canvas;
 use crate::geometry::update_hierarchy;
+use crate::history::{AppSnapshot, History};
 use crate::menubar::{handle_native_menu_events, NativeMenuBar};
 use crate::models::{
     export_annotation_tree, ActiveDrag, Annotation, AnnotationFile, Draft, LoadedImage, ProjectFile,
@@ -48,6 +49,7 @@ pub struct AnnotatorApp {
     pub request_label_focus: bool,
     pub native_menubar: Option<NativeMenuBar>,
     pub project_description: Option<String>,
+    pub history: History,
 }
 
 impl AnnotatorApp {
@@ -67,6 +69,7 @@ impl AnnotatorApp {
             request_label_focus: false,
             native_menubar: Some(NativeMenuBar::new()),
             project_description: None,
+            history: History::new(),
         }
     }
 
@@ -123,6 +126,7 @@ impl AnnotatorApp {
                 self.zoom = 1.0;
                 self.pan = egui::Vec2::ZERO;
                 self.next_id = 1;
+                self.clear_history();
                 self.status = format!("{} × {}  •  READY", width, height);
             }
             Err(error) => self.status = format!("COULD NOT OPEN IMAGE: {error}"),
@@ -176,12 +180,59 @@ impl AnnotatorApp {
                 self.active_drag = None;
                 self.zoom = 1.0;
                 self.pan = egui::Vec2::ZERO;
+                self.clear_history();
                 self.status = format!("PROJECT LOADED  •  {}", path.display());
             }
             Err(error) => {
                 self.status = format!("COULD NOT OPEN IMAGE ({}): {error}", img_path.display());
             }
         }
+    }
+
+    pub fn current_snapshot(&self) -> AppSnapshot {
+        AppSnapshot {
+            annotations: self.annotations.clone(),
+            selected: self.selected,
+            next_id: self.next_id,
+        }
+    }
+
+    pub fn apply_snapshot(&mut self, snapshot: AppSnapshot) {
+        self.annotations = snapshot.annotations;
+        self.selected = snapshot.selected;
+        self.next_id = snapshot.next_id;
+        update_hierarchy(&mut self.annotations);
+        self.editing_label = None;
+        self.active_drag = None;
+        self.draft = None;
+    }
+
+    pub fn undo(&mut self) {
+        let current = self.current_snapshot();
+        if let Some(snapshot) = self.history.undo(current) {
+            self.apply_snapshot(snapshot);
+            self.status = "UNDO".into();
+        }
+    }
+
+    pub fn redo(&mut self) {
+        let current = self.current_snapshot();
+        if let Some(snapshot) = self.history.redo(current) {
+            self.apply_snapshot(snapshot);
+            self.status = "REDO".into();
+        }
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.history.can_redo()
+    }
+
+    pub fn clear_history(&mut self) {
+        self.history.clear();
     }
 
     pub fn save_dialog(&mut self) {
@@ -273,7 +324,9 @@ impl AnnotatorApp {
     }
 
     pub fn delete_selected(&mut self) {
-        if let Some(id) = self.selected.take() {
+        if let Some(id) = self.selected {
+            self.history.record(self.current_snapshot());
+            self.selected = None;
             self.annotations.retain(|annotation| annotation.id != id);
             update_hierarchy(&mut self.annotations);
             self.editing_label = None;
@@ -283,7 +336,7 @@ impl AnnotatorApp {
     }
 
     pub fn shortcuts_and_drops(&mut self, ctx: &egui::Context) {
-        let (open_img, open_proj, save_proj, export_json, delete, escape, dropped) = ctx.input(|input| {
+        let (open_img, open_proj, save_proj, export_json, undo, redo, delete, escape, dropped) = ctx.input(|input| {
             let cmd_or_ctrl = input.modifiers.command || input.modifiers.ctrl;
             let shift = input.modifiers.shift;
             (
@@ -291,6 +344,9 @@ impl AnnotatorApp {
                 cmd_or_ctrl && shift && input.key_pressed(Key::O),
                 cmd_or_ctrl && input.key_pressed(Key::S),
                 cmd_or_ctrl && input.key_pressed(Key::E),
+                cmd_or_ctrl && !shift && input.key_pressed(Key::Z),
+                (cmd_or_ctrl && shift && input.key_pressed(Key::Z))
+                    || (cmd_or_ctrl && input.key_pressed(Key::Y)),
                 input.key_pressed(Key::Delete) || input.key_pressed(Key::Backspace),
                 input.key_pressed(Key::Escape),
                 input.raw.dropped_files.clone(),
@@ -309,8 +365,14 @@ impl AnnotatorApp {
         if export_json {
             self.export_dialog();
         }
-        if delete && !ctx.wants_keyboard_input() {
-            self.delete_selected();
+        if !ctx.wants_keyboard_input() {
+            if redo {
+                self.redo();
+            } else if undo {
+                self.undo();
+            } else if delete {
+                self.delete_selected();
+            }
         }
         if escape {
             self.draft = None;
@@ -335,5 +397,107 @@ impl eframe::App for AnnotatorApp {
         render_left_sidebar(self, ctx);
         render_right_sidebar(self, ctx);
         render_canvas(self, ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_app() -> AnnotatorApp {
+        AnnotatorApp {
+            image: None,
+            annotations: Vec::new(),
+            selected: None,
+            editing_label: None,
+            next_id: 1,
+            draft: None,
+            active_drag: None,
+            zoom: 1.0,
+            pan: egui::Vec2::ZERO,
+            status: String::new(),
+            request_label_focus: false,
+            native_menubar: None,
+            project_description: None,
+            history: History::new(),
+        }
+    }
+
+    fn sample_annotation(id: u32) -> Annotation {
+        Annotation {
+            id,
+            label: format!("region_{id}"),
+            description: None,
+            x: 10.0 * id as f32,
+            y: 10.0 * id as f32,
+            width: 50.0,
+            height: 50.0,
+            color: [255, 0, 0],
+            parent_id: None,
+        }
+    }
+
+    #[test]
+    fn test_undo_redo_basic() {
+        let mut app = test_app();
+        assert!(!app.can_undo());
+        assert!(!app.can_redo());
+
+        // Snapshot initial empty state and add annotation 1
+        app.history.record(app.current_snapshot());
+        app.annotations.push(sample_annotation(1));
+        app.selected = Some(1);
+        app.next_id = 2;
+
+        assert!(app.can_undo());
+        assert!(!app.can_redo());
+        assert_eq!(app.annotations.len(), 1);
+
+        // Undo
+        app.undo();
+        assert_eq!(app.annotations.len(), 0);
+        assert_eq!(app.selected, None);
+        assert!(!app.can_undo());
+        assert!(app.can_redo());
+
+        // Redo
+        app.redo();
+        assert_eq!(app.annotations.len(), 1);
+        assert_eq!(app.selected, Some(1));
+        assert!(app.can_undo());
+        assert!(!app.can_redo());
+    }
+
+    #[test]
+    fn test_undo_redo_delete_selected() {
+        let mut app = test_app();
+        app.annotations.push(sample_annotation(1));
+        app.selected = Some(1);
+
+        app.delete_selected();
+        assert_eq!(app.annotations.len(), 0);
+        assert_eq!(app.selected, None);
+        assert!(app.can_undo());
+
+        app.undo();
+        assert_eq!(app.annotations.len(), 1);
+        assert_eq!(app.annotations[0].id, 1);
+        assert_eq!(app.selected, Some(1));
+    }
+
+    #[test]
+    fn test_redo_stack_cleared_on_new_action() {
+        let mut app = test_app();
+        app.history.record(app.current_snapshot());
+        app.annotations.push(sample_annotation(1));
+
+        app.undo();
+        assert!(app.can_redo());
+
+        // Perform a new mutation
+        app.history.record(app.current_snapshot());
+        app.annotations.push(sample_annotation(2));
+
+        assert!(!app.can_redo());
     }
 }

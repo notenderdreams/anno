@@ -133,7 +133,7 @@ pub struct Draft {
 
 #[cfg(test)]
 mod tests {
-    use super::{export_annotation_tree, Annotation};
+    use super::{export_annotation_tree, Annotation, ProjectFile};
 
     fn annotation(id: u32, parent_id: Option<u32>) -> Annotation {
         Annotation {
@@ -172,8 +172,6 @@ mod tests {
 
     #[test]
     fn project_file_round_trip() {
-        use super::ProjectFile;
-
         let project = ProjectFile {
             image: "test_sample.png".into(),
             image_width: 800,
