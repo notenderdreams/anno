@@ -74,6 +74,22 @@ pub struct AnnotationFile<'a> {
 }
 
 #[derive(Serialize)]
+pub struct UnifiedDatasetExport<'a> {
+    pub dataset_name: String,
+    pub total_images: usize,
+    pub annotated_images: usize,
+    pub images: Vec<UnifiedImageExport<'a>>,
+}
+
+#[derive(Serialize)]
+pub struct UnifiedImageExport<'a> {
+    pub image: String,
+    pub image_width: u32,
+    pub image_height: u32,
+    pub annotations: Vec<ExportAnnotation<'a>>,
+}
+
+#[derive(Clone, Serialize)]
 pub struct ExportAnnotation<'a> {
     pub id: u32,
     pub label: &'a str,
@@ -119,6 +135,7 @@ fn export_annotation<'a>(
     }
 }
 
+#[derive(Clone)]
 pub struct LoadedImage {
     pub texture: TextureHandle,
     pub path: PathBuf,

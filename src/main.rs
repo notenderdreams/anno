@@ -1,5 +1,7 @@
 pub mod app;
+pub mod bottom_bar;
 pub mod canvas;
+pub mod dataset;
 pub mod geometry;
 pub mod history;
 pub mod menubar;
@@ -8,6 +10,7 @@ pub mod render;
 pub mod sidebar_left;
 pub mod sidebar_right;
 pub mod theme;
+pub mod thumbnail_loader;
 
 use app::AnnotatorApp;
 use eframe::egui::ViewportBuilder;

@@ -256,18 +256,54 @@ pub fn render_right_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
             if app.image.is_some() {
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    export_requested = ui
-                        .add_sized(
-                            [ui.available_width(), 32.0],
-                            egui::Button::new(
-                                RichText::new("EXPORT JSON")
-                                     .size(10.0)
-                                    .strong()
-                                    .color(Color32::BLACK),
+                    if app.image_files.len() > 1 {
+                        if ui
+                            .add_sized(
+                                [ui.available_width(), 30.0],
+                                egui::Button::new(
+                                    RichText::new("EXPORT DATASET JSON")
+                                        .size(10.0)
+                                        .strong()
+                                        .color(Color32::BLACK),
+                                )
+                                .fill(Color32::WHITE)
+                                .rounding(0.0),
                             )
-                            .fill(Color32::WHITE),
-                        )
-                        .clicked();
+                            .clicked()
+                        {
+                            app.export_unified_dataset_dialog();
+                        }
+                        ui.add_space(4.0);
+                        if ui
+                            .add_sized(
+                                [ui.available_width(), 26.0],
+                                egui::Button::new(
+                                    RichText::new("EXPORT IMAGE JSON")
+                                        .size(9.0)
+                                        .color(Color32::from_gray(200)),
+                                )
+                                .fill(Color32::from_gray(24))
+                                .rounding(0.0),
+                            )
+                            .clicked()
+                        {
+                            export_requested = true;
+                        }
+                    } else {
+                        export_requested = ui
+                            .add_sized(
+                                [ui.available_width(), 32.0],
+                                egui::Button::new(
+                                    RichText::new("EXPORT JSON")
+                                        .size(10.0)
+                                        .strong()
+                                        .color(Color32::BLACK),
+                                )
+                                .fill(Color32::WHITE)
+                                .rounding(0.0),
+                            )
+                            .clicked();
+                    }
                 });
             }
         });

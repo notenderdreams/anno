@@ -12,14 +12,24 @@ hierarchies, and export nested JSON.
 cargo run
 ```
 
-Open or drop an image, then drag over it to create a region. Use the inspector to
-edit its label and color.
+Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` / `Cmd+Shift+F`) to start annotating an entire dataset batch.
+
+## Batch & Dataset Workflow
+
+- **Folder Scanning**: Automatically detects all `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, and `.tiff` files sorted with natural alphanumeric ordering (`img1`, `img2`, `img10`).
+- **Interactive Filmstrip**: Browse image pills in the bottom bar with live status indicators and annotation badges (`[3]`).
+- **Seamless Auto-Saving**: Automatically saves each image's progress to a `<image_stem>.anno` sidecar file when navigating between images.
+- **Fast Navigation**: Move swiftly through the batch using `A` / `D` or `[` / `]`.
 
 ## Controls
 
 - `Cmd/Ctrl+O` — open an image
+- `Cmd/Ctrl+Option+O` / `Cmd+Shift+F` — open folder dataset
+- `A` / `[` — previous image in dataset
+- `D` / `]` — next image in dataset
 - `Cmd/Ctrl+S` — save project (.anno)
-- `Cmd/Ctrl+E` — export annotations JSON
+- `Cmd/Ctrl+E` — export current image JSON
+- `Cmd/Ctrl+Shift+E` — export unified dataset JSON
 - `Cmd/Ctrl+Z` — undo
 - `Cmd/Ctrl+Shift+Z` / `Cmd/Ctrl+Y` — redo
 - `Delete` / `Backspace` — remove the selected region
@@ -27,7 +37,29 @@ edit its label and color.
 - Scroll — zoom toward the cursor
 - `Space` + drag or middle-drag — pan
 
-## Export
+## Export Formats
+
+### 1. Unified Dataset Export (`Cmd+Shift+E`)
+
+Compiles the entire folder of images and their hierarchical region annotations into a single structured dataset JSON:
+
+```json
+{
+  "dataset_name": "surveillance_batch",
+  "total_images": 28,
+  "annotated_images": 14,
+  "images": [
+    {
+      "image": "frame_001.jpg",
+      "image_width": 1920,
+      "image_height": 1080,
+      "annotations": [ ... ]
+    }
+  ]
+}
+```
+
+### 2. Single Image Export (`Cmd+E`)
 
 Annotations are exported as nested JSON. Regions inside another region appear in
 its `children` array:

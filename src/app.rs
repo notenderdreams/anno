@@ -1,16 +1,21 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use eframe::egui::{self, Key};
 
+use crate::bottom_bar::render_bottom_bar;
 use crate::canvas::render_canvas;
+use crate::dataset::{check_sidecar_annotation_count, scan_image_folder};
 use crate::geometry::update_hierarchy;
 use crate::history::{AppSnapshot, History};
 use crate::menubar::{handle_native_menu_events, NativeMenuBar};
 use crate::models::{
     export_annotation_tree, ActiveDrag, Annotation, AnnotationFile, Draft, LoadedImage, ProjectFile,
+    UnifiedDatasetExport, UnifiedImageExport,
 };
 use crate::sidebar_left::render_left_sidebar;
 use crate::sidebar_right::render_right_sidebar;
 use crate::theme::configure_style;
+use crate::thumbnail_loader::BackgroundLoader;
 
 fn resolve_image_path(anno_path: &Path, image_str: &str) -> PathBuf {
     let raw_path = PathBuf::from(image_str);
@@ -50,6 +55,15 @@ pub struct AnnotatorApp {
     pub native_menubar: Option<NativeMenuBar>,
     pub project_description: Option<String>,
     pub history: History,
+    pub dataset_folder: Option<PathBuf>,
+    pub image_files: Vec<PathBuf>,
+    pub current_image_idx: Option<usize>,
+    pub auto_save_dataset: bool,
+    pub annotation_counts: HashMap<PathBuf, usize>,
+    pub thumbnail_cache: HashMap<PathBuf, egui::TextureHandle>,
+    pub image_cache: HashMap<PathBuf, LoadedImage>,
+    pub annotations_cache: HashMap<PathBuf, (Vec<Annotation>, Option<String>, u32)>,
+    pub loader: BackgroundLoader,
 }
 
 impl AnnotatorApp {
@@ -65,11 +79,44 @@ impl AnnotatorApp {
             active_drag: None,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
-            status: "OPEN AN IMAGE OR PROJECT TO BEGIN".into(),
+            status: "OPEN AN IMAGE OR FOLDER TO BEGIN".into(),
             request_label_focus: false,
             native_menubar: Some(NativeMenuBar::new()),
             project_description: None,
             history: History::new(),
+            dataset_folder: None,
+            image_files: Vec::new(),
+            current_image_idx: None,
+            auto_save_dataset: true,
+            annotation_counts: HashMap::new(),
+            thumbnail_cache: HashMap::new(),
+            image_cache: HashMap::new(),
+            annotations_cache: HashMap::new(),
+            loader: BackgroundLoader::new(),
+        }
+    }
+
+    pub fn request_thumbnail(&mut self, path: &Path) {
+        if !self.thumbnail_cache.contains_key(path) {
+            self.loader.request_thumbnail(path);
+        }
+    }
+
+    pub fn preload_adjacent_images(&mut self) {
+        let Some(idx) = self.current_image_idx else { return };
+        let total = self.image_files.len();
+
+        let targets = [
+            if idx + 1 < total { Some(idx + 1) } else { None },
+            if idx + 2 < total { Some(idx + 2) } else { None },
+            if idx > 0 { Some(idx - 1) } else { None },
+        ];
+
+        for target_idx in targets.into_iter().flatten() {
+            let path = &self.image_files[target_idx];
+            if !self.image_cache.contains_key(path) {
+                self.loader.request_preload_image(path);
+            }
         }
     }
 
@@ -89,6 +136,12 @@ impl AnnotatorApp {
         }
     }
 
+    pub fn open_folder_dialog(&mut self, ctx: &egui::Context) {
+        if let Some(path) = rfd::FileDialog::new().pick_folder() {
+            self.load_folder(ctx, path);
+        }
+    }
+
     pub fn open_project_dialog(&mut self, ctx: &egui::Context) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("Anno Project (*.anno)", &["anno"])
@@ -99,37 +152,226 @@ impl AnnotatorApp {
         }
     }
 
-    pub fn load_image(&mut self, ctx: &egui::Context, path: PathBuf) {
-        match image::open(&path) {
-            Ok(decoded) => {
-                let rgba = decoded.to_rgba8();
-                let (width, height) = rgba.dimensions();
-                let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                    [width as usize, height as usize],
-                    rgba.as_raw(),
-                );
-                let texture = ctx.load_texture(
-                    path.to_string_lossy(),
-                    color_image,
-                    egui::TextureOptions::LINEAR,
-                );
-                self.image = Some(LoadedImage {
-                    texture,
-                    path,
-                    width,
-                    height,
-                });
-                self.annotations.clear();
-                self.selected = None;
-                self.editing_label = None;
-                self.active_drag = None;
-                self.zoom = 1.0;
-                self.pan = egui::Vec2::ZERO;
-                self.next_id = 1;
-                self.clear_history();
-                self.status = format!("{} × {}  •  READY", width, height);
+    pub fn load_folder(&mut self, ctx: &egui::Context, folder: PathBuf) {
+        self.auto_save_current_image();
+
+        let files = scan_image_folder(&folder);
+        if files.is_empty() {
+            self.status = format!("NO IMAGES FOUND IN: {}", folder.display());
+            return;
+        }
+
+        self.thumbnail_cache.clear();
+        self.image_cache.clear();
+        self.annotations_cache.clear();
+        self.loader.clear();
+        self.dataset_folder = Some(folder.clone());
+        self.image_files = files;
+        self.refresh_annotation_counts();
+        self.switch_to_image_index(ctx, 0);
+    }
+
+    pub fn refresh_annotation_counts(&mut self) {
+        self.annotation_counts.clear();
+        for path in &self.image_files {
+            if let Some(count) = check_sidecar_annotation_count(path) {
+                self.annotation_counts.insert(path.clone(), count);
             }
-            Err(error) => self.status = format!("COULD NOT OPEN IMAGE: {error}"),
+        }
+    }
+
+    pub fn switch_to_image_index(&mut self, ctx: &egui::Context, new_index: usize) {
+        if self.image_files.is_empty() || new_index >= self.image_files.len() {
+            return;
+        }
+
+        let path = self.image_files[new_index].clone();
+        let target_is_loaded = self.image.as_ref().is_some_and(|image| image.path == path);
+        if self.current_image_idx == Some(new_index) && target_is_loaded {
+            return;
+        }
+
+        self.auto_save_current_image();
+        self.current_image_idx = Some(new_index);
+        self.load_image_internal(ctx, path);
+    }
+
+    pub fn next_image(&mut self, ctx: &egui::Context) {
+        if let Some(idx) = self.current_image_idx {
+            if idx + 1 < self.image_files.len() {
+                self.switch_to_image_index(ctx, idx + 1);
+            }
+        } else if !self.image_files.is_empty() {
+            self.switch_to_image_index(ctx, 0);
+        }
+    }
+
+    pub fn previous_image(&mut self, ctx: &egui::Context) {
+        if let Some(idx) = self.current_image_idx {
+            if idx > 0 {
+                self.switch_to_image_index(ctx, idx - 1);
+            }
+        }
+    }
+
+    pub fn auto_save_current_image(&mut self) {
+        let Some(image) = &self.image else { return };
+        self.annotations_cache.insert(
+            image.path.clone(),
+            (
+                self.annotations.clone(),
+                self.project_description.clone(),
+                self.next_id,
+            ),
+        );
+
+        if !self.auto_save_dataset {
+            return;
+        }
+
+        let anno_path = image.path.with_extension("anno");
+        if self.annotations.is_empty() {
+            if anno_path.exists() {
+                let _ = std::fs::remove_file(&anno_path);
+            }
+            self.annotation_counts.remove(&image.path);
+            return;
+        }
+
+        let project = ProjectFile {
+            image: image.path.to_string_lossy().into_owned(),
+            image_width: image.width,
+            image_height: image.height,
+            description: self.project_description.clone(),
+            next_id: self.next_id,
+            annotations: self.annotations.clone(),
+        };
+
+        if let Ok(json) = serde_json::to_string_pretty(&project) {
+            let _ = std::fs::write(&anno_path, json);
+            self.annotation_counts.insert(image.path.clone(), self.annotations.len());
+        }
+    }
+
+    pub fn load_image(&mut self, ctx: &egui::Context, path: PathBuf) {
+        self.auto_save_current_image();
+
+        if let Some(parent) = path.parent() {
+            let needs_rescan = self.dataset_folder.as_deref() != Some(parent);
+            if needs_rescan {
+                self.dataset_folder = Some(parent.to_path_buf());
+                self.image_files = scan_image_folder(parent);
+                self.refresh_annotation_counts();
+            }
+            if let Some(idx) = self.image_files.iter().position(|p| p == &path) {
+                self.current_image_idx = Some(idx);
+            } else {
+                self.image_files.push(path.clone());
+                self.current_image_idx = Some(self.image_files.len() - 1);
+            }
+        }
+
+        self.load_image_internal(ctx, path);
+    }
+
+    fn load_image_internal(&mut self, ctx: &egui::Context, path: PathBuf) {
+        if let Some(cached) = self.image_cache.get(&path) {
+            self.image = Some(cached.clone());
+        } else {
+            match image::open(&path) {
+                Ok(decoded) => {
+                    let rgba = decoded.to_rgba8();
+                    let (width, height) = rgba.dimensions();
+                    let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                        [width as usize, height as usize],
+                        rgba.as_raw(),
+                    );
+                    let texture = ctx.load_texture(
+                        path.to_string_lossy(),
+                        color_image,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    let loaded = LoadedImage {
+                        texture,
+                        path: path.clone(),
+                        width,
+                        height,
+                    };
+                    self.image_cache.insert(path.clone(), loaded.clone());
+                    self.image = Some(loaded);
+                }
+                Err(error) => {
+                    self.status = format!("COULD NOT OPEN IMAGE: {error}");
+                    return;
+                }
+            }
+        }
+
+        if let Some((cached_annos, desc, next_id)) = self.annotations_cache.get(&path) {
+            self.annotations = cached_annos.clone();
+            self.project_description = desc.clone();
+            self.next_id = *next_id;
+            update_hierarchy(&mut self.annotations);
+        } else {
+            let anno_path = path.with_extension("anno");
+            if anno_path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&anno_path) {
+                    if let Ok(project) = serde_json::from_str::<ProjectFile>(&content) {
+                        self.project_description = project.description;
+                        self.annotations = project.annotations;
+                        update_hierarchy(&mut self.annotations);
+                        let max_id = self.annotations.iter().map(|a| a.id).max().unwrap_or(0);
+                        self.next_id = project.next_id.max(max_id + 1);
+                    } else {
+                        self.annotations.clear();
+                        self.project_description = None;
+                        self.next_id = 1;
+                    }
+                } else {
+                    self.annotations.clear();
+                    self.project_description = None;
+                    self.next_id = 1;
+                }
+            } else {
+                self.annotations.clear();
+                self.project_description = None;
+                self.next_id = 1;
+            }
+            self.annotations_cache.insert(
+                path.clone(),
+                (
+                    self.annotations.clone(),
+                    self.project_description.clone(),
+                    self.next_id,
+                ),
+            );
+        }
+
+        self.annotation_counts.insert(path.clone(), self.annotations.len());
+        self.selected = None;
+        self.editing_label = None;
+        self.active_drag = None;
+        self.zoom = 1.0;
+        self.pan = egui::Vec2::ZERO;
+        self.clear_history();
+
+        self.preload_adjacent_images();
+
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("image");
+
+        if let (Some(idx), Some(img)) = (self.current_image_idx, &self.image) {
+            let total = self.image_files.len();
+            self.status = format!(
+                "IMAGE {:02}/{:02}  •  {}  •  {} × {}",
+                idx + 1,
+                total,
+                file_name,
+                img.width,
+                img.height
+            );
         }
     }
 
@@ -319,6 +561,136 @@ impl AnnotatorApp {
         }
     }
 
+    pub fn export_unified_dataset_dialog(&mut self) {
+        if self.image_files.is_empty() {
+            self.status = "NO DATASET LOADED TO EXPORT".into();
+            return;
+        }
+
+        self.auto_save_current_image();
+
+        let dataset_name = self
+            .dataset_folder
+            .as_ref()
+            .and_then(|f| f.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("dataset");
+
+        let default_name = format!("{dataset_name}.json");
+
+        if let Some(path) = rfd::FileDialog::new()
+            .set_file_name(default_name)
+            .add_filter("JSON Dataset (*.json)", &["json"])
+            .save_file()
+        {
+            self.export_unified_dataset_to(&path);
+        }
+    }
+
+    pub fn export_unified_dataset_to(&mut self, path: &Path) {
+        if self.image_files.is_empty() {
+            return;
+        }
+
+        self.auto_save_current_image();
+
+        let dataset_name = self
+            .dataset_folder
+            .as_ref()
+            .and_then(|f| f.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("dataset")
+            .to_string();
+
+        let mut images_data = Vec::new();
+        let mut annotated_count = 0;
+
+        for image_path in &self.image_files {
+            let (width, height, annotations) = if let Some(current_img) = &self.image {
+                if current_img.path == *image_path {
+                    (current_img.width, current_img.height, self.annotations.clone())
+                } else if let Some((cached_annos, _, _)) = self.annotations_cache.get(image_path) {
+                    let (w, h) = if let Some(img) = self.image_cache.get(image_path) {
+                        (img.width, img.height)
+                    } else {
+                        image::image_dimensions(image_path).unwrap_or((1920, 1080))
+                    };
+                    (w, h, cached_annos.clone())
+                } else {
+                    let anno_path = image_path.with_extension("anno");
+                    if let Ok(content) = std::fs::read_to_string(&anno_path) {
+                        if let Ok(proj) = serde_json::from_str::<ProjectFile>(&content) {
+                            (proj.image_width, proj.image_height, proj.annotations)
+                        } else {
+                            let (w, h) = image::image_dimensions(image_path).unwrap_or((1920, 1080));
+                            (w, h, Vec::new())
+                        }
+                    } else {
+                        let (w, h) = image::image_dimensions(image_path).unwrap_or((1920, 1080));
+                        (w, h, Vec::new())
+                    }
+                }
+            } else if let Some((cached_annos, _, _)) = self.annotations_cache.get(image_path) {
+                let (w, h) = if let Some(img) = self.image_cache.get(image_path) {
+                    (img.width, img.height)
+                } else {
+                    image::image_dimensions(image_path).unwrap_or((1920, 1080))
+                };
+                (w, h, cached_annos.clone())
+            } else {
+                let anno_path = image_path.with_extension("anno");
+                if let Ok(content) = std::fs::read_to_string(&anno_path) {
+                    if let Ok(proj) = serde_json::from_str::<ProjectFile>(&content) {
+                        (proj.image_width, proj.image_height, proj.annotations)
+                    } else {
+                        let (w, h) = image::image_dimensions(image_path).unwrap_or((1920, 1080));
+                        (w, h, Vec::new())
+                    }
+                } else {
+                    let (w, h) = image::image_dimensions(image_path).unwrap_or((1920, 1080));
+                    (w, h, Vec::new())
+                }
+            };
+
+            if !annotations.is_empty() {
+                annotated_count += 1;
+            }
+
+            let file_name = image_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("image")
+                .to_string();
+
+            images_data.push((file_name, width, height, annotations));
+        }
+
+        let unified_images: Vec<UnifiedImageExport> = images_data
+            .iter()
+            .map(|(name, w, h, annos)| UnifiedImageExport {
+                image: name.clone(),
+                image_width: *w,
+                image_height: *h,
+                annotations: export_annotation_tree(annos),
+            })
+            .collect();
+
+        let dataset_export = UnifiedDatasetExport {
+            dataset_name,
+            total_images: self.image_files.len(),
+            annotated_images: annotated_count,
+            images: unified_images,
+        };
+
+        match serde_json::to_string_pretty(&dataset_export)
+            .map_err(|e| e.to_string())
+            .and_then(|json| std::fs::write(path, json).map_err(|e| e.to_string()))
+        {
+            Ok(()) => self.status = format!("DATASET EXPORTED  •  {}", path.display()),
+            Err(e) => self.status = format!("DATASET EXPORT FAILED: {e}"),
+        }
+    }
+
     pub fn save_to(&mut self, path: &Path) {
         self.export_to(path);
     }
@@ -336,18 +708,25 @@ impl AnnotatorApp {
     }
 
     pub fn shortcuts_and_drops(&mut self, ctx: &egui::Context) {
-        let (open_img, open_proj, save_proj, export_json, undo, redo, delete, escape, dropped) = ctx.input(|input| {
+        let (open_img, open_folder, open_proj, save_proj, export_json, export_dataset, undo, redo, delete, prev_img, next_img, escape, dropped) = ctx.input(|input| {
             let cmd_or_ctrl = input.modifiers.command || input.modifiers.ctrl;
             let shift = input.modifiers.shift;
+            let alt = input.modifiers.alt;
             (
-                cmd_or_ctrl && !shift && input.key_pressed(Key::O),
+                cmd_or_ctrl && !shift && !alt && input.key_pressed(Key::O),
+                cmd_or_ctrl && (alt && input.key_pressed(Key::O) || shift && input.key_pressed(Key::F)),
                 cmd_or_ctrl && shift && input.key_pressed(Key::O),
                 cmd_or_ctrl && input.key_pressed(Key::S),
-                cmd_or_ctrl && input.key_pressed(Key::E),
+                cmd_or_ctrl && !shift && input.key_pressed(Key::E),
+                cmd_or_ctrl && shift && input.key_pressed(Key::E),
                 cmd_or_ctrl && !shift && input.key_pressed(Key::Z),
                 (cmd_or_ctrl && shift && input.key_pressed(Key::Z))
                     || (cmd_or_ctrl && input.key_pressed(Key::Y)),
                 input.key_pressed(Key::Delete) || input.key_pressed(Key::Backspace),
+                input.key_pressed(Key::OpenBracket)
+                    || (!cmd_or_ctrl && !alt && input.key_pressed(Key::A)),
+                input.key_pressed(Key::CloseBracket)
+                    || (!cmd_or_ctrl && !alt && input.key_pressed(Key::D)),
                 input.key_pressed(Key::Escape),
                 input.raw.dropped_files.clone(),
             )
@@ -355,6 +734,9 @@ impl AnnotatorApp {
 
         if open_img {
             self.open_image_dialog(ctx);
+        }
+        if open_folder {
+            self.open_folder_dialog(ctx);
         }
         if open_proj {
             self.open_project_dialog(ctx);
@@ -365,6 +747,9 @@ impl AnnotatorApp {
         if export_json {
             self.export_dialog();
         }
+        if export_dataset {
+            self.export_unified_dataset_dialog();
+        }
         if !ctx.wants_keyboard_input() {
             if redo {
                 self.redo();
@@ -372,6 +757,10 @@ impl AnnotatorApp {
                 self.undo();
             } else if delete {
                 self.delete_selected();
+            } else if prev_img {
+                self.previous_image(ctx);
+            } else if next_img {
+                self.next_image(ctx);
             }
         }
         if escape {
@@ -381,7 +770,9 @@ impl AnnotatorApp {
             self.selected = None;
         }
         if let Some(path) = dropped.into_iter().find_map(|file| file.path) {
-            if path.extension().and_then(|ext| ext.to_str()) == Some("anno") {
+            if path.is_dir() {
+                self.load_folder(ctx, path);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("anno") {
                 self.load_project(ctx, &path);
             } else {
                 self.load_image(ctx, path);
@@ -392,8 +783,10 @@ impl AnnotatorApp {
 
 impl eframe::App for AnnotatorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.loader.poll_results(ctx, &mut self.thumbnail_cache, &mut self.image_cache);
         handle_native_menu_events(self, ctx);
         self.shortcuts_and_drops(ctx);
+        render_bottom_bar(self, ctx);
         render_left_sidebar(self, ctx);
         render_right_sidebar(self, ctx);
         render_canvas(self, ctx);
@@ -420,6 +813,15 @@ mod tests {
             native_menubar: None,
             project_description: None,
             history: History::new(),
+            dataset_folder: None,
+            image_files: Vec::new(),
+            current_image_idx: None,
+            auto_save_dataset: true,
+            annotation_counts: HashMap::new(),
+            thumbnail_cache: HashMap::new(),
+            image_cache: HashMap::new(),
+            annotations_cache: HashMap::new(),
+            loader: BackgroundLoader::new(),
         }
     }
 
@@ -499,5 +901,86 @@ mod tests {
         app.annotations.push(sample_annotation(2));
 
         assert!(!app.can_redo());
+    }
+
+    #[test]
+    fn test_batch_navigation_bounds() {
+        let mut app = test_app();
+        app.image_files = vec![
+            PathBuf::from("img1.png"),
+            PathBuf::from("img2.png"),
+            PathBuf::from("img3.png"),
+        ];
+        app.current_image_idx = Some(0);
+
+        // Navigation state checks
+        assert_eq!(app.current_image_idx, Some(0));
+        assert_eq!(app.image_files.len(), 3);
+    }
+
+    #[test]
+    fn test_switch_reloads_same_index_when_batch_image_changed() {
+        let ctx = egui::Context::default();
+        let old_path = PathBuf::from("old_batch/frame_1.png");
+        let new_path = PathBuf::from("new_batch/frame_1.png");
+        let pixel = egui::ColorImage::new([1, 1], egui::Color32::WHITE);
+
+        let old_image = LoadedImage {
+            texture: ctx.load_texture("old", pixel.clone(), egui::TextureOptions::LINEAR),
+            path: old_path,
+            width: 1,
+            height: 1,
+        };
+        let new_image = LoadedImage {
+            texture: ctx.load_texture("new", pixel, egui::TextureOptions::LINEAR),
+            path: new_path.clone(),
+            width: 1,
+            height: 1,
+        };
+
+        let mut app = test_app();
+        app.image = Some(old_image);
+        app.current_image_idx = Some(0);
+        app.image_files = vec![new_path.clone()];
+        app.image_cache.insert(new_path.clone(), new_image);
+
+        app.switch_to_image_index(&ctx, 0);
+
+        assert_eq!(app.current_image_idx, Some(0));
+        assert_eq!(app.image.as_ref().map(|image| &image.path), Some(&new_path));
+    }
+
+    #[test]
+    fn test_export_unified_dataset_json() {
+        let mut app = test_app();
+        let path1 = PathBuf::from("frame_01.png");
+        let path2 = PathBuf::from("frame_02.png");
+        app.dataset_folder = Some(PathBuf::from("/dataset"));
+        app.image_files = vec![path1.clone(), path2.clone()];
+        app.annotations_cache.insert(
+            path1,
+            (vec![sample_annotation(1)], Some("car".into()), 2),
+        );
+        app.annotations_cache.insert(
+            path2,
+            (vec![sample_annotation(2)], None, 3),
+        );
+
+        let temp_dir = std::env::temp_dir();
+        let export_path = temp_dir.join("anno_test_unified_export.json");
+        app.export_unified_dataset_to(&export_path);
+
+        assert!(export_path.exists());
+        let content = std::fs::read_to_string(&export_path).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        assert_eq!(val["total_images"], 2);
+        assert_eq!(val["annotated_images"], 2);
+        assert_eq!(val["images"][0]["image"], "frame_01.png");
+        assert_eq!(val["images"][0]["annotations"][0]["id"], 1);
+        assert_eq!(val["images"][1]["image"], "frame_02.png");
+        assert_eq!(val["images"][1]["annotations"][0]["id"], 2);
+
+        let _ = std::fs::remove_file(export_path);
     }
 }

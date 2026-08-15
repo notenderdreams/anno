@@ -13,6 +13,48 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
         )
         .show(ctx, |ui| {
             ui.add_space(4.0);
+
+            if !app.image_files.is_empty() {
+                let current_idx = app.current_image_idx.unwrap_or(0);
+                let total_images = app.image_files.len();
+                let folder_name = app
+                    .dataset_folder
+                    .as_ref()
+                    .and_then(|f| f.file_name())
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("BATCH");
+
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("DATASET")
+                            .size(9.0)
+                            .strong()
+                            .color(MUTED),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(format!("{:02}/{:02}", current_idx + 1, total_images))
+                                .size(9.0)
+                                .monospace()
+                                .strong()
+                                .color(RED),
+                        );
+                    });
+                });
+
+                ui.add_space(2.0);
+                ui.label(
+                    RichText::new(folder_name)
+                        .size(11.0)
+                        .monospace()
+                        .color(Color32::WHITE),
+                );
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
+            }
+
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new("SCENE HIERARCHY")
