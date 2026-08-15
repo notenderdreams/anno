@@ -18,9 +18,10 @@ Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` /
 
 - **Folder Scanning**: Automatically detects all `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, and `.tiff` files sorted with natural alphanumeric ordering (`img1`, `img2`, `img10`).
 - **Interactive Filmstrip**: Browse image pills in the bottom bar with live status indicators and annotation badges (`[3]`).
+- **Filmstrip Filters**: Instantly filter thumbnail views between `ALL`, `DONE` (annotated images), and `TODO` (unannotated images) to accelerate reviewing and batch labeling.
 - **Seamless Auto-Saving**: Automatically saves each image's progress to a `<image_stem>.anno` sidecar file when navigating between images.
 - **Batch Projects**: Save and reopen the full dataset state as one `.annobatch` file with `Cmd/Ctrl+S`.
-- **Fast Navigation**: Move swiftly through the batch using `A` / `D` or `[` / `]`.
+- **Fast Navigation**: Move swiftly through the batch (or filtered subset) using `A` / `D` or `[` / `]`.
 
 ## Controls
 

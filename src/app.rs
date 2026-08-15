@@ -11,7 +11,7 @@ use crate::menubar::{handle_native_menu_events, NativeMenuBar};
 use crate::models::{
     assign_preset_to_annotations, default_presets, export_annotation_tree, next_category_label,
     ActiveDrag, Annotation, AnnotationFile, BatchProjectFile, ClassPreset, Draft, DraftPolygon,
-    LoadedImage, ProjectFile, ToolMode, UnifiedDatasetExport, UnifiedImageExport,
+    FilmstripFilter, LoadedImage, ProjectFile, ToolMode, UnifiedDatasetExport, UnifiedImageExport,
 };
 use crate::sidebar_left::render_left_sidebar;
 use crate::sidebar_right::render_right_sidebar;
@@ -55,6 +55,7 @@ pub struct AnnotatorApp {
     pub current_image_idx: Option<usize>,
     pub pending_image_idx: Option<usize>,
     pub auto_save_dataset: bool,
+    pub filmstrip_filter: FilmstripFilter,
     pub annotation_counts: HashMap<PathBuf, usize>,
     pub thumbnail_cache: HashMap<PathBuf, egui::TextureHandle>,
     pub image_cache: HashMap<PathBuf, LoadedImage>,
@@ -81,7 +82,7 @@ impl AnnotatorApp {
             active_drag: None,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
-            status: "OPEN AN IMAGE OR FOLDER TO BEGIN".into(),
+            status: "READY".into(),
             request_label_focus: false,
             native_menubar: Some(NativeMenuBar::new()),
             project_description: None,
@@ -91,6 +92,7 @@ impl AnnotatorApp {
             current_image_idx: None,
             pending_image_idx: None,
             auto_save_dataset: true,
+            filmstrip_filter: FilmstripFilter::All,
             annotation_counts: HashMap::new(),
             thumbnail_cache: HashMap::new(),
             image_cache: HashMap::new(),
@@ -101,6 +103,47 @@ impl AnnotatorApp {
             autocomplete_nav: None,
         }
     }
+}
+
+impl Default for AnnotatorApp {
+    fn default() -> Self {
+        Self {
+            image: None,
+            annotations: Vec::new(),
+            selected: HashSet::new(),
+            editing_label: None,
+            next_id: 1,
+            tool_mode: ToolMode::Rectangle,
+            draft: None,
+            draft_polygon: None,
+            marquee: None,
+            active_drag: None,
+            zoom: 1.0,
+            pan: egui::Vec2::ZERO,
+            status: "READY".into(),
+            request_label_focus: false,
+            native_menubar: None,
+            project_description: None,
+            history: History::new(),
+            dataset_folder: None,
+            image_files: Vec::new(),
+            current_image_idx: None,
+            pending_image_idx: None,
+            auto_save_dataset: true,
+            filmstrip_filter: FilmstripFilter::All,
+            annotation_counts: HashMap::new(),
+            thumbnail_cache: HashMap::new(),
+            image_cache: HashMap::new(),
+            annotations_cache: HashMap::new(),
+            loader: BackgroundLoader::new(),
+            presets: default_presets(),
+            active_preset_idx: 0,
+            autocomplete_nav: None,
+        }
+    }
+}
+
+impl AnnotatorApp {
 
     pub fn finish_draft_polygon(&mut self) -> bool {
         let Some(poly) = self.draft_polygon.take() else {
@@ -144,8 +187,8 @@ impl AnnotatorApp {
         });
 
         self.select_single(id);
-        self.editing_label = Some(id);
-        self.request_label_focus = true;
+        self.editing_label = None;
+        self.request_label_focus = false;
         self.status = format!("POLYGON REGION {id:02} CREATED");
         update_hierarchy(&mut self.annotations);
         true
@@ -433,21 +476,58 @@ impl AnnotatorApp {
         self.load_image_internal(ctx, path);
     }
 
-    pub fn next_image(&mut self, ctx: &egui::Context) {
-        if let Some(idx) = self.current_image_idx {
-            if idx + 1 < self.image_files.len() {
-                self.switch_to_image_index(ctx, idx + 1);
+    pub fn image_annotation_count(&self, path: &Path) -> usize {
+        if let Some(current_img) = &self.image {
+            if current_img.path == path {
+                return self.annotations.len();
             }
-        } else if !self.image_files.is_empty() {
-            self.switch_to_image_index(ctx, 0);
+        }
+        self.annotation_counts.get(path).copied().unwrap_or(0)
+    }
+
+    pub fn filtered_image_indices(&self) -> Vec<usize> {
+        match self.filmstrip_filter {
+            FilmstripFilter::All => (0..self.image_files.len()).collect(),
+            FilmstripFilter::Annotated => (0..self.image_files.len())
+                .filter(|&idx| {
+                    let path = &self.image_files[idx];
+                    self.image_annotation_count(path) > 0
+                })
+                .collect(),
+            FilmstripFilter::Unannotated => (0..self.image_files.len())
+                .filter(|&idx| {
+                    let path = &self.image_files[idx];
+                    self.image_annotation_count(path) == 0
+                })
+                .collect(),
+        }
+    }
+
+    pub fn next_image(&mut self, ctx: &egui::Context) {
+        let indices = self.filtered_image_indices();
+        if indices.is_empty() {
+            return;
+        }
+        if let Some(curr) = self.current_image_idx {
+            if let Some(&next) = indices.iter().find(|&&idx| idx > curr) {
+                self.switch_to_image_index(ctx, next);
+            }
+        } else if let Some(&first) = indices.first() {
+            self.switch_to_image_index(ctx, first);
         }
     }
 
     pub fn previous_image(&mut self, ctx: &egui::Context) {
-        if let Some(idx) = self.current_image_idx {
-            if idx > 0 {
-                self.switch_to_image_index(ctx, idx - 1);
+        let indices = self.filtered_image_indices();
+        if indices.is_empty() {
+            return;
+        }
+        if let Some(curr) = self.current_image_idx {
+            if let Some(&prev) = indices.iter().rev().find(|&&idx| idx < curr) {
+                self.switch_to_image_index(ctx, prev);
             }
+        } else if let Some(&last) = indices.last() {
+            self.switch_to_image_index(ctx, last);
         }
     }
 
@@ -1321,10 +1401,16 @@ impl AnnotatorApp {
             } else if tool_rect {
                 self.tool_mode = ToolMode::Rectangle;
                 self.draft_polygon = None;
+                self.marquee = None;
+                self.active_drag = None;
                 self.status = "BOX TOOL SELECTED (DRAG TO DRAW)".to_string();
             } else if tool_poly {
                 self.tool_mode = ToolMode::Polygon;
+                self.selected.clear();
+                self.editing_label = None;
                 self.draft = None;
+                self.marquee = None;
+                self.active_drag = None;
                 self.status = "POLYGON TOOL SELECTED (CLICK TO PLACE POINTS, 3+ TO CLOSE)".to_string();
             } else if enter && self.draft_polygon.as_ref().map_or(false, |p| p.points.len() >= 3) {
                 ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
@@ -1422,6 +1508,7 @@ mod tests {
             current_image_idx: None,
             pending_image_idx: None,
             auto_save_dataset: true,
+            filmstrip_filter: FilmstripFilter::All,
             annotation_counts: HashMap::new(),
             thumbnail_cache: HashMap::new(),
             image_cache: HashMap::new(),
@@ -2059,7 +2146,8 @@ mod tests {
         assert!(poly_anno.points.is_some());
         assert_eq!(poly_anno.points.as_ref().unwrap().len(), 4);
         assert_eq!(app.selected.len(), 1);
-        assert_eq!(app.editing_label, Some(1));
+        assert!(app.is_selected(1));
+        assert_eq!(app.editing_label, None);
     }
 
     #[test]
@@ -2173,5 +2261,92 @@ mod tests {
         assert_eq!(app.annotations[0].points.as_ref().unwrap().len(), 3);
         assert!(app.can_undo());
         assert!(!app.can_redo());
+    }
+
+    #[test]
+    fn test_filmstrip_filtering() {
+        let mut app = test_app();
+        let img1 = PathBuf::from("/path/to/img1.png");
+        let img2 = PathBuf::from("/path/to/img2.png");
+        let img3 = PathBuf::from("/path/to/img3.png");
+        app.image_files = vec![img1.clone(), img2.clone(), img3.clone()];
+
+        // img1: 2 annotations, img2: 0 annotations, img3: 1 annotation
+        app.annotation_counts.insert(img1.clone(), 2);
+        app.annotation_counts.insert(img2.clone(), 0);
+        app.annotation_counts.insert(img3.clone(), 1);
+
+        // 1. Filter: All
+        app.filmstrip_filter = FilmstripFilter::All;
+        assert_eq!(app.filtered_image_indices(), vec![0, 1, 2]);
+
+        // 2. Filter: Annotated
+        app.filmstrip_filter = FilmstripFilter::Annotated;
+        assert_eq!(app.filtered_image_indices(), vec![0, 2]);
+
+        // 3. Filter: Unannotated
+        app.filmstrip_filter = FilmstripFilter::Unannotated;
+        assert_eq!(app.filtered_image_indices(), vec![1]);
+
+        // 4. Live annotation count takes precedence for currently open image
+        let ctx = egui::Context::default();
+        let pixel = egui::ColorImage::new([1, 1], egui::Color32::WHITE);
+        app.image = Some(LoadedImage {
+            texture: ctx.load_texture("test_img", pixel, egui::TextureOptions::LINEAR),
+            width: 100,
+            height: 100,
+            path: img2.clone(),
+        });
+        app.annotations.push(sample_annotation(1));
+
+        // Now img2 has 1 active annotation in memory
+        assert_eq!(app.image_annotation_count(&img2), 1);
+
+        app.filmstrip_filter = FilmstripFilter::Annotated;
+        assert_eq!(app.filtered_image_indices(), vec![0, 1, 2]);
+
+        app.filmstrip_filter = FilmstripFilter::Unannotated;
+        assert!(app.filtered_image_indices().is_empty());
+    }
+
+    #[test]
+    fn test_polygon_draft_inside_existing_rectangle() {
+        let mut app = test_app();
+        app.tool_mode = ToolMode::Polygon;
+
+        // Existing rectangle annotation at (0, 0, 100, 100)
+        app.annotations.push(Annotation {
+            id: 1,
+            label: "container".into(),
+            description: None,
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+            color: [255, 0, 0],
+            parent_id: None,
+            locked: false,
+            points: None,
+        });
+        app.next_id = 2;
+
+        // Placing anchor point inside the rectangle (50, 50)
+        let mut draft = DraftPolygon::new(Pos2::new(50.0, 50.0));
+        draft.add_point(Pos2::new(70.0, 50.0));
+        draft.add_point(Pos2::new(70.0, 70.0));
+        draft.add_point(Pos2::new(50.0, 70.0));
+        app.draft_polygon = Some(draft);
+
+        // Selection must not be hijacked by the rectangle
+        assert!(app.selected.is_empty());
+        assert!(app.finish_draft_polygon());
+
+        // Now we have 2 annotations: 1 rectangle (id 1) and 1 polygon (id 2) nested inside it
+        assert_eq!(app.annotations.len(), 2);
+        let poly = &app.annotations[1];
+        assert_eq!(poly.id, 2);
+        assert!(poly.points.is_some());
+        assert_eq!(poly.x, 50.0);
+        assert_eq!(poly.y, 50.0);
     }
 }

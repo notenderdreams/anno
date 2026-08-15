@@ -212,42 +212,42 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                     if minimap_rect.map_or(false, |r| r.contains(pointer)) {
                         ctx.set_cursor_icon(CursorIcon::PointingHand);
                     } else if image_rect.contains(pointer) {
-                        let mut cursor_set = false;
-                        for &selected_id in &app.selected {
-                            if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id) {
-                                let rect = annotation_screen_rect(annotation, image_rect, image_size);
-                                if let Some(handle) = hit_resize_handle(rect, pointer) {
-                                    match handle {
-                                        ResizeHandle::TopLeft | ResizeHandle::BottomRight => {
-                                            ctx.set_cursor_icon(CursorIcon::ResizeNwSe);
-                                        }
-                                        ResizeHandle::TopRight | ResizeHandle::BottomLeft => {
-                                            ctx.set_cursor_icon(CursorIcon::ResizeNeSw);
-                                        }
-                                    }
-                                    cursor_set = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if !cursor_set {
-                            if app.tool_mode == ToolMode::Polygon {
-                                if let Some(poly) = &app.draft_polygon {
-                                    let can_close = if let Some(first) = poly.points.first() {
-                                        let first_screen = image_to_screen(*first, image_rect, image_size);
-                                        poly.points.len() >= 3 && first_screen.distance(pointer) <= 16.0
-                                    } else {
-                                        false
-                                    };
-                                    if can_close {
-                                        ctx.set_cursor_icon(CursorIcon::PointingHand);
-                                    } else {
-                                        ctx.set_cursor_icon(CursorIcon::Crosshair);
-                                    }
+                        if app.tool_mode == ToolMode::Polygon {
+                            if let Some(poly) = &app.draft_polygon {
+                                let can_close = if let Some(first) = poly.points.first() {
+                                    let first_screen = image_to_screen(*first, image_rect, image_size);
+                                    poly.points.len() >= 3 && first_screen.distance(pointer) <= 16.0
+                                } else {
+                                    false
+                                };
+                                if can_close {
+                                    ctx.set_cursor_icon(CursorIcon::PointingHand);
                                 } else {
                                     ctx.set_cursor_icon(CursorIcon::Crosshair);
                                 }
                             } else {
+                                ctx.set_cursor_icon(CursorIcon::Crosshair);
+                            }
+                        } else {
+                            let mut cursor_set = false;
+                            for &selected_id in &app.selected {
+                                if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id) {
+                                    let rect = annotation_screen_rect(annotation, image_rect, image_size);
+                                    if let Some(handle) = hit_resize_handle(rect, pointer) {
+                                        match handle {
+                                            ResizeHandle::TopLeft | ResizeHandle::BottomRight => {
+                                                ctx.set_cursor_icon(CursorIcon::ResizeNwSe);
+                                            }
+                                            ResizeHandle::TopRight | ResizeHandle::BottomLeft => {
+                                                ctx.set_cursor_icon(CursorIcon::ResizeNeSw);
+                                            }
+                                        }
+                                        cursor_set = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if !cursor_set {
                                 let over_tag = app.annotations.iter().any(|a| {
                                     !a.locked && annotation_tag_rect(a, image_rect, image_size).contains(pointer)
                                 });
@@ -283,14 +283,16 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
             if response.double_clicked() {
                 if app.tool_mode == ToolMode::Polygon && app.draft_polygon.as_ref().map_or(false, |p| p.points.len() >= 3) {
                     app.finish_draft_polygon();
-                } else if let Some(pointer) = response.interact_pointer_pos() {
-                    if !minimap_rect.map_or(false, |r| r.contains(pointer)) {
-                        if let Some(hit) = hit_annotation(&app.annotations, image_rect, image_size, pointer) {
-                            let hit_id = hit.id;
-                            app.history.begin_edit(app.current_snapshot());
-                            app.select_single(hit_id);
-                            app.editing_label = Some(hit_id);
-                            app.request_label_focus = true;
+                } else if app.tool_mode == ToolMode::Rectangle {
+                    if let Some(pointer) = response.interact_pointer_pos() {
+                        if !minimap_rect.map_or(false, |r| r.contains(pointer)) {
+                            if let Some(hit) = hit_annotation(&app.annotations, image_rect, image_size, pointer) {
+                                let hit_id = hit.id;
+                                app.history.begin_edit(app.current_snapshot());
+                                app.select_single(hit_id);
+                                app.editing_label = Some(hit_id);
+                                app.request_label_focus = true;
+                            }
                         }
                     }
                 }
@@ -307,30 +309,32 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         let shift_held = ctx.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
                         let mut handled = false;
 
-                        // 1. Check resize handle on selected UNLOCKED annotations
-                        for &selected_id in &app.selected {
-                            if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
-                                let rect = annotation_screen_rect(annotation, image_rect, image_size);
-                                if let Some(handle) = hit_resize_handle(rect, pointer) {
-                                    app.history.begin_edit(app.current_snapshot());
-                                    app.active_drag = Some(ActiveDrag::Resize {
-                                        id: selected_id,
-                                        handle,
-                                        start_pointer: pointer,
-                                        initial_x: annotation.x,
-                                        initial_y: annotation.y,
-                                        initial_w: annotation.width,
-                                        initial_h: annotation.height,
-                                        initial_points: annotation.points.clone(),
-                                    });
-                                    handled = true;
-                                    break;
+                        // 1. Check resize handle on selected UNLOCKED annotations (only in Box mode)
+                        if app.tool_mode == ToolMode::Rectangle {
+                            for &selected_id in &app.selected {
+                                if let Some(annotation) = app.annotations.iter().find(|a| a.id == selected_id && !a.locked) {
+                                    let rect = annotation_screen_rect(annotation, image_rect, image_size);
+                                    if let Some(handle) = hit_resize_handle(rect, pointer) {
+                                        app.history.begin_edit(app.current_snapshot());
+                                        app.active_drag = Some(ActiveDrag::Resize {
+                                            id: selected_id,
+                                            handle,
+                                            start_pointer: pointer,
+                                            initial_x: annotation.x,
+                                            initial_y: annotation.y,
+                                            initial_w: annotation.width,
+                                            initial_h: annotation.height,
+                                            initial_points: annotation.points.clone(),
+                                        });
+                                        handled = true;
+                                        break;
+                                    }
                                 }
                             }
                         }
 
-                        // 2. Check hit on annotation tag or ALREADY SELECTED body to move (when not drafting polygon)
-                        if !handled && app.draft_polygon.is_none() {
+                        // 2. Check hit on annotation tag or ALREADY SELECTED body to move (only in Box mode)
+                        if !handled && app.tool_mode == ToolMode::Rectangle {
                             let hit_tag = app
                                 .annotations
                                 .iter()
@@ -380,13 +384,13 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         }
 
                         // 3. Drawing new annotation (or marquee selection if Shift held)
-                        if !handled {
+                        if !handled && app.tool_mode == ToolMode::Rectangle {
                             if shift_held {
                                 app.marquee = Some(Draft {
                                     start: pointer,
                                     current: pointer,
                                 });
-                            } else if app.tool_mode == ToolMode::Rectangle {
+                            } else {
                                 app.selected.clear();
                                 app.editing_label = None;
                                 app.draft = Some(Draft {
@@ -564,8 +568,8 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         });
 
                         app.select_single(id);
-                        app.editing_label = Some(id);
-                        app.request_label_focus = true;
+                        app.editing_label = None;
+                        app.request_label_focus = false;
                         app.status = format!("REGION {id:02} CREATED");
                     }
                 }
@@ -583,6 +587,30 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         }
                     }
                 }
+                if app.tool_mode == ToolMode::Polygon && !space_held && !response.clicked() {
+                    if let Some(pointer) = response.interact_pointer_pos() {
+                        if image_rect.contains(pointer) && !minimap_rect.map_or(false, |r| r.contains(pointer)) {
+                            let img_pos = screen_to_image(pointer, image_rect, image_size);
+                            if app.draft_polygon.is_none() {
+                                app.selected.clear();
+                                app.editing_label = None;
+                                app.draft_polygon = Some(DraftPolygon::new(img_pos));
+                                app.status = "PEN TOOL: 1 POINT PLACED  •  CLICK TO ADD MORE (RETURN TO START TO CLOSE)".into();
+                            } else if let Some(poly) = &mut app.draft_polygon {
+                                let start_screen = image_to_screen(poly.points[0], image_rect, image_size);
+                                if poly.points.len() >= 3 && start_screen.distance(pointer) <= 16.0 {
+                                    app.finish_draft_polygon();
+                                } else {
+                                    poly.add_point(img_pos);
+                                    app.status = format!(
+                                        "PEN TOOL: {} POINTS PLACED  •  CLICK START POINT OR PRESS ENTER TO CLOSE",
+                                        poly.points.len()
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
                 update_hierarchy(&mut app.annotations);
             }
 
@@ -593,26 +621,14 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                             app.pan = pan_from_minimap_click(pointer, m_img_rect, display_size, canvas.size());
                         }
                     } else if image_rect.contains(pointer) {
-                        let shift_held = ctx.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
-
                         if app.tool_mode == ToolMode::Polygon {
                             let img_pos = screen_to_image(pointer, image_rect, image_size);
 
                             if app.draft_polygon.is_none() {
-                                let hit = hit_annotation(&app.annotations, image_rect, image_size, pointer);
-                                if let Some(annotation) = hit {
-                                    let hit_id = annotation.id;
-                                    if shift_held {
-                                        app.toggle_select(hit_id);
-                                    } else {
-                                        app.select_single(hit_id);
-                                    }
-                                } else {
-                                    app.selected.clear();
-                                    app.editing_label = None;
-                                    app.draft_polygon = Some(DraftPolygon::new(img_pos));
-                                    app.status = "PEN TOOL: 1 POINT PLACED  •  CLICK TO ADD MORE (RETURN TO START TO CLOSE)".into();
-                                }
+                                app.selected.clear();
+                                app.editing_label = None;
+                                app.draft_polygon = Some(DraftPolygon::new(img_pos));
+                                app.status = "PEN TOOL: 1 POINT PLACED  •  CLICK TO ADD MORE (RETURN TO START TO CLOSE)".into();
                             } else if let Some(poly) = &mut app.draft_polygon {
                                 let start_screen = image_to_screen(poly.points[0], image_rect, image_size);
                                 if poly.points.len() >= 3 && start_screen.distance(pointer) <= 16.0 {
@@ -626,6 +642,7 @@ pub fn render_canvas(app: &mut AnnotatorApp, ctx: &egui::Context) {
                                 }
                             }
                         } else {
+                            let shift_held = ctx.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
                             let hit = hit_annotation(&app.annotations, image_rect, image_size, pointer);
                             if let Some(annotation) = hit {
                                 let hit_id = annotation.id;
@@ -1116,5 +1133,36 @@ mod tests {
         // Click bottom-right of minimap: (260, 220) -> pans to show bottom-right of image
         let pan_br = pan_from_minimap_click(Pos2::new(260.0, 220.0), minimap_img_rect, display_size, canvas_size);
         assert_eq!(pan_br, Vec2::new(-400.0, -300.0));
+    }
+
+    #[test]
+    fn test_polygon_mode_does_not_select_existing_rectangle() {
+        let mut app = crate::app::AnnotatorApp::default();
+        app.tool_mode = ToolMode::Polygon;
+
+        // Existing rectangle (0,0) to (200,200) with id 1
+        app.annotations.push(sample_annotation(1, 0.0, 0.0, 200.0, 200.0));
+        app.next_id = 2;
+        assert!(app.selected.is_empty());
+
+        // Point inside the rectangle
+        let point_inside = Pos2::new(50.0, 50.0);
+        let mut draft = DraftPolygon::new(point_inside);
+        draft.add_point(Pos2::new(100.0, 50.0));
+        draft.add_point(Pos2::new(100.0, 100.0));
+        app.draft_polygon = Some(draft);
+
+        // Still nothing selected, polygon has 3 points
+        assert!(app.selected.is_empty());
+        assert_eq!(app.draft_polygon.as_ref().unwrap().points.len(), 3);
+
+        // Finish polygon
+        assert!(app.finish_draft_polygon());
+        assert_eq!(app.annotations.len(), 2);
+        // New polygon (id 0 or next_id) is selected, not the container rectangle
+        assert_eq!(app.selected.len(), 1);
+        let selected_id = *app.selected.iter().next().unwrap();
+        let selected_anno = app.annotations.iter().find(|a| a.id == selected_id).unwrap();
+        assert!(selected_anno.points.is_some());
     }
 }

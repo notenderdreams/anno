@@ -1,6 +1,6 @@
 use eframe::egui::{self, Color32, FontFamily, FontId, Margin, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use crate::app::AnnotatorApp;
-use crate::models::ToolMode;
+use crate::models::{FilmstripFilter, ToolMode};
 use crate::render::draw_lucide_lock;
 use crate::theme::{MUTED, PANEL, RED};
 
@@ -18,47 +18,58 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
 
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("DRAWING TOOL")
-                        .size(10.0)
+                    RichText::new("TOOL")
+                        .size(9.5)
                         .strong()
                         .color(MUTED),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    let avail_w = ((ui.available_width() - 3.0) / 2.0).floor();
+
                     let is_poly = app.tool_mode == ToolMode::Polygon;
                     let poly_btn = ui.add_sized(
-                        Vec2::new(76.0, 18.0),
+                        Vec2::new(avail_w, 20.0),
                         egui::Button::new(
                             RichText::new("POLYGON [P]")
-                                .size(8.5)
+                                .size(8.0)
                                 .monospace()
                                 .strong()
                                 .color(if is_poly { Color32::WHITE } else { MUTED }),
                         )
-                        .fill(if is_poly { Color32::from_rgb(30, 60, 120) } else { Color32::from_gray(24) })
-                        .stroke(Stroke::new(1.0_f32, if is_poly { Color32::from_rgb(70, 130, 240) } else { Color32::from_gray(45) })),
+                        .fill(if is_poly { Color32::from_rgb(30, 60, 120) } else { Color32::from_gray(22) })
+                        .stroke(Stroke::new(1.0_f32, if is_poly { Color32::from_rgb(70, 130, 240) } else { Color32::from_gray(42) }))
+                        .rounding(0.0),
                     );
                     if poly_btn.clicked() {
                         app.tool_mode = ToolMode::Polygon;
+                        app.selected.clear();
+                        app.editing_label = None;
                         app.draft = None;
+                        app.marquee = None;
+                        app.active_drag = None;
                         app.status = "POLYGON TOOL (CLICK TO PLACE POINTS, 3+ TO CLOSE)".into();
                     }
 
                     let is_rect = app.tool_mode == ToolMode::Rectangle;
                     let rect_btn = ui.add_sized(
-                        Vec2::new(54.0, 18.0),
+                        Vec2::new(avail_w, 20.0),
                         egui::Button::new(
                             RichText::new("BOX [B]")
-                                .size(8.5)
+                                .size(8.0)
                                 .monospace()
                                 .strong()
                                 .color(if is_rect { Color32::WHITE } else { MUTED }),
                         )
-                        .fill(if is_rect { Color32::from_rgb(30, 60, 120) } else { Color32::from_gray(24) })
-                        .stroke(Stroke::new(1.0_f32, if is_rect { Color32::from_rgb(70, 130, 240) } else { Color32::from_gray(45) })),
+                        .fill(if is_rect { Color32::from_rgb(30, 60, 120) } else { Color32::from_gray(22) })
+                        .stroke(Stroke::new(1.0_f32, if is_rect { Color32::from_rgb(70, 130, 240) } else { Color32::from_gray(42) }))
+                        .rounding(0.0),
                     );
                     if rect_btn.clicked() {
                         app.tool_mode = ToolMode::Rectangle;
                         app.draft_polygon = None;
+                        app.marquee = None;
+                        app.active_drag = None;
                         app.status = "BOX TOOL (DRAG TO DRAW)".into();
                     }
                 });
@@ -71,6 +82,8 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
             if !app.image_files.is_empty() {
                 let current_idx = app.current_image_idx.unwrap_or(0);
                 let total_images = app.image_files.len();
+                let total_annotated = app.image_files.iter().filter(|p| app.image_annotation_count(p) > 0).count();
+                let total_unannotated = total_images.saturating_sub(total_annotated);
                 let folder_name = app
                     .dataset_folder
                     .as_ref()
@@ -103,6 +116,40 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         .monospace()
                         .color(Color32::WHITE),
                 );
+
+                ui.add_space(6.0);
+                let avail_w = ui.available_width();
+                let tab_w = ((avail_w - 4.0) / 3.0).floor();
+
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+
+                    let filters = [
+                        (FilmstripFilter::All, format!("ALL ({total_images})")),
+                        (FilmstripFilter::Annotated, format!("DONE ({total_annotated})")),
+                        (FilmstripFilter::Unannotated, format!("TODO ({total_unannotated})")),
+                    ];
+
+                    for (filter, label) in filters {
+                        let is_active = app.filmstrip_filter == filter;
+                        let btn = ui.add_sized(
+                            Vec2::new(tab_w, 20.0),
+                            egui::Button::new(
+                                RichText::new(label)
+                                    .size(8.0)
+                                    .monospace()
+                                    .strong()
+                                    .color(if is_active { Color32::WHITE } else { MUTED }),
+                            )
+                            .fill(if is_active { Color32::from_rgb(38, 26, 26) } else { Color32::from_gray(18) })
+                            .stroke(Stroke::new(1.0_f32, if is_active { RED } else { Color32::from_gray(38) }))
+                            .rounding(0.0),
+                        );
+                        if btn.clicked() {
+                            app.filmstrip_filter = filter;
+                        }
+                    }
+                });
 
                 ui.add_space(8.0);
                 ui.separator();

@@ -9,6 +9,14 @@ pub enum ToolMode {
     Polygon,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum FilmstripFilter {
+    #[default]
+    All,
+    Annotated,
+    Unannotated,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum ResizeHandle {
     TopLeft,
