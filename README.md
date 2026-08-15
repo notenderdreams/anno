@@ -25,8 +25,13 @@ Open a single image, drop a directory, or use `Open Folder...` (`Cmd+Option+O` /
 
 ## Controls
 
-- `B` — switch to Box / Rectangle drawing tool
-- `P` — switch to Polygon / Multi-Point drawing tool (click points, 3+ to close; click start point or press `Enter` to finish; `Esc` / right-click to undo point)
+- `V` — switch to **Select / Transform tool** (select, move, resize, marquee select, and refine polygon vertices)
+- `B` — switch to **Box / Rectangle drawing tool** (drag to draw bounding boxes)
+- `P` — switch to **Polygon / Multi-Point drawing tool** (click points, 3+ to close; click start point or press `Enter` to finish; `Esc` / right-click to undo point)
+- **Refine Polygon Vertices** (in Select mode `V`):
+  - Drag vertex — move individual vertex to reshape polygon
+  - Double-click edge — insert a new vertex along that edge
+  - Right-click vertex — delete vertex (when > 3 points)
 - `Cmd/Ctrl+O` — open an image
 - `Cmd/Ctrl+Option+O` / `Cmd+Shift+F` — open folder dataset
 - `A` / `[` — previous image in dataset

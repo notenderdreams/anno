@@ -5,6 +5,7 @@ use std::path::PathBuf;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ToolMode {
     #[default]
+    Select,
     Rectangle,
     Polygon,
 }
@@ -42,6 +43,12 @@ pub enum ActiveDrag {
     },
     MinimapPan {
         start_pointer: Pos2,
+    },
+    MoveVertex {
+        id: u32,
+        vertex_idx: usize,
+        start_pointer: Pos2,
+        initial_point: [f32; 2],
     },
 }
 

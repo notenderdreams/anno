@@ -1464,9 +1464,13 @@ impl AnnotatorApp {
             }
         });
 
-        let (tool_rect, tool_poly) = ctx.input(|input| {
+        let (tool_select, tool_rect, tool_poly) = ctx.input(|input| {
             let no_mod = !input.modifiers.command && !input.modifiers.ctrl && !input.modifiers.shift && !input.modifiers.alt;
-            (no_mod && input.key_pressed(Key::B), no_mod && input.key_pressed(Key::P))
+            (
+                no_mod && input.key_pressed(Key::V),
+                no_mod && input.key_pressed(Key::B),
+                no_mod && input.key_pressed(Key::P),
+            )
         });
 
         let (arrow_left, arrow_right, arrow_up, arrow_down, arrow_shift) = ctx.input(|input| {
@@ -1501,12 +1505,19 @@ impl AnnotatorApp {
                 self.nudge_selected(nudge_x, nudge_y);
             } else if let Some(idx) = digit_preset {
                 self.apply_preset(idx);
+            } else if tool_select {
+                self.tool_mode = ToolMode::Select;
+                self.draft = None;
+                self.draft_polygon = None;
+                self.marquee = None;
+                self.active_drag = None;
+                self.status = "SELECT TOOL (CLICK / MARQUEE / MOVE / REFINE)".to_string();
             } else if tool_rect {
                 self.tool_mode = ToolMode::Rectangle;
                 self.draft_polygon = None;
                 self.marquee = None;
                 self.active_drag = None;
-                self.status = "BOX TOOL SELECTED (DRAG TO DRAW)".to_string();
+                self.status = "BOX TOOL (DRAG TO DRAW)".to_string();
             } else if tool_poly {
                 self.tool_mode = ToolMode::Polygon;
                 self.selected.clear();
@@ -1514,7 +1525,7 @@ impl AnnotatorApp {
                 self.draft = None;
                 self.marquee = None;
                 self.active_drag = None;
-                self.status = "POLYGON TOOL SELECTED (CLICK TO PLACE POINTS, 3+ TO CLOSE)".to_string();
+                self.status = "POLYGON TOOL (CLICK TO PLACE POINTS, 3+ TO CLOSE)".to_string();
             } else if enter && self.draft_polygon.as_ref().map_or(false, |p| p.points.len() >= 3) {
                 ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                 self.finish_draft_polygon();
@@ -2271,6 +2282,10 @@ mod tests {
     fn test_tool_mode_switching_and_cancellation() {
         let mut app = test_app();
         assert_eq!(app.tool_mode, ToolMode::Rectangle);
+
+        // Switch to select mode
+        app.tool_mode = ToolMode::Select;
+        assert_eq!(app.tool_mode, ToolMode::Select);
 
         // Switch to polygon mode
         app.tool_mode = ToolMode::Polygon;

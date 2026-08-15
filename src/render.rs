@@ -129,6 +129,7 @@ pub fn draw_polygon_annotation(
     box_color: Color32,
     selected: bool,
     locked: bool,
+    hovered_vertex: Option<usize>,
 ) {
     if screen_points.len() < 2 {
         return;
@@ -163,12 +164,14 @@ pub fn draw_polygon_annotation(
         );
     }
 
-    // Vertex handles
-    let dot_radius = if selected { 3.5_f32 } else { 2.2_f32 };
-    for &pt in screen_points {
-        painter.circle_filled(pt, dot_radius, color);
-        if selected {
-            painter.circle_stroke(pt, dot_radius + 1.0, Stroke::new(1.0_f32, Color32::WHITE));
+    // Vertex handles (interactive when selected and unlocked)
+    let dot_radius = if selected { 4.0_f32 } else { 2.2_f32 };
+    for (i, &pt) in screen_points.iter().enumerate() {
+        let is_hovered = selected && !locked && hovered_vertex == Some(i);
+        let r = if is_hovered { dot_radius + 2.0 } else { dot_radius };
+        painter.circle_filled(pt, r, if is_hovered { Color32::WHITE } else { color });
+        if selected && !locked {
+            painter.circle_stroke(pt, r + 1.0, Stroke::new(1.0_f32, if is_hovered { color } else { Color32::WHITE }));
         }
     }
 

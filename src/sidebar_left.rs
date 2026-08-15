@@ -24,15 +24,15 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         .color(MUTED),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 3.0;
-                    let avail_w = ((ui.available_width() - 3.0) / 2.0).floor();
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    let avail_w = ((ui.available_width() - 4.0) / 3.0).floor();
 
                     let is_poly = app.tool_mode == ToolMode::Polygon;
                     let poly_btn = ui.add_sized(
                         Vec2::new(avail_w, 20.0),
                         egui::Button::new(
-                            RichText::new("POLYGON [P]")
-                                .size(8.0)
+                            RichText::new("POLY [P]")
+                                .size(7.5)
                                 .monospace()
                                 .strong()
                                 .color(if is_poly { Color32::WHITE } else { MUTED }),
@@ -56,7 +56,7 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         Vec2::new(avail_w, 20.0),
                         egui::Button::new(
                             RichText::new("BOX [B]")
-                                .size(8.0)
+                                .size(7.5)
                                 .monospace()
                                 .strong()
                                 .color(if is_rect { Color32::WHITE } else { MUTED }),
@@ -71,6 +71,29 @@ pub fn render_left_sidebar(app: &mut AnnotatorApp, ctx: &egui::Context) {
                         app.marquee = None;
                         app.active_drag = None;
                         app.status = "BOX TOOL (DRAG TO DRAW)".into();
+                    }
+
+                    let is_select = app.tool_mode == ToolMode::Select;
+                    let select_btn = ui.add_sized(
+                        Vec2::new(avail_w, 20.0),
+                        egui::Button::new(
+                            RichText::new("SELECT [V]")
+                                .size(7.5)
+                                .monospace()
+                                .strong()
+                                .color(if is_select { Color32::WHITE } else { MUTED }),
+                        )
+                        .fill(if is_select { Color32::from_rgb(30, 60, 120) } else { Color32::from_gray(22) })
+                        .stroke(Stroke::new(1.0_f32, if is_select { Color32::from_rgb(70, 130, 240) } else { Color32::from_gray(42) }))
+                        .rounding(0.0),
+                    );
+                    if select_btn.clicked() {
+                        app.tool_mode = ToolMode::Select;
+                        app.draft = None;
+                        app.draft_polygon = None;
+                        app.marquee = None;
+                        app.active_drag = None;
+                        app.status = "SELECT TOOL (CLICK / MARQUEE / MOVE / REFINE)".into();
                     }
                 });
             });

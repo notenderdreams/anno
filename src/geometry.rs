@@ -114,6 +114,63 @@ pub fn polygon_bounding_box(points: &[Pos2]) -> (f32, f32, f32, f32) {
     (min_x, min_y, (max_x - min_x).max(1.0), (max_y - min_y).max(1.0))
 }
 
+pub fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
+    let ab = b - a;
+    let len_sq = ab.length_sq();
+    if len_sq == 0.0 {
+        return p.distance(a);
+    }
+    let t = ((p - a).dot(ab) / len_sq).clamp(0.0, 1.0);
+    let projection = a + ab * t;
+    p.distance(projection)
+}
+
+pub fn hit_polygon_vertex(
+    points: &[[f32; 2]],
+    image_rect: Rect,
+    image_size: Vec2,
+    pointer: Pos2,
+    threshold: f32,
+) -> Option<usize> {
+    let mut best_idx = None;
+    let mut best_dist = threshold;
+    for (i, &[px, py]) in points.iter().enumerate() {
+        let screen_pt = image_to_screen(Pos2::new(px, py), image_rect, image_size);
+        let d = screen_pt.distance(pointer);
+        if d <= best_dist {
+            best_dist = d;
+            best_idx = Some(i);
+        }
+    }
+    best_idx
+}
+
+pub fn hit_polygon_edge(
+    points: &[[f32; 2]],
+    image_rect: Rect,
+    image_size: Vec2,
+    pointer: Pos2,
+    threshold: f32,
+) -> Option<usize> {
+    if points.len() < 2 {
+        return None;
+    }
+    let mut best_edge = None;
+    let mut best_dist = threshold;
+    let n = points.len();
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let p1 = image_to_screen(Pos2::new(points[i][0], points[i][1]), image_rect, image_size);
+        let p2 = image_to_screen(Pos2::new(points[j][0], points[j][1]), image_rect, image_size);
+        let d = distance_to_segment(pointer, p1, p2);
+        if d <= best_dist {
+            best_dist = d;
+            best_edge = Some(i);
+        }
+    }
+    best_edge
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,5 +204,62 @@ mod tests {
         assert_eq!(y, 10.0);
         assert_eq!(w, 40.0);
         assert_eq!(h, 70.0);
+    }
+
+    #[test]
+    fn test_distance_to_segment() {
+        let a = Pos2::new(0.0, 0.0);
+        let b = Pos2::new(10.0, 0.0);
+
+        // Point directly above middle
+        assert_eq!(distance_to_segment(Pos2::new(5.0, 5.0), a, b), 5.0);
+        // Point to the left of start
+        assert_eq!(distance_to_segment(Pos2::new(-3.0, 0.0), a, b), 3.0);
+        // Point to the right of end
+        assert_eq!(distance_to_segment(Pos2::new(14.0, 0.0), a, b), 4.0);
+    }
+
+    #[test]
+    fn test_hit_polygon_vertex() {
+        let points = vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]];
+        let img_rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0));
+        let img_size = Vec2::new(100.0, 100.0);
+
+        // Hovering near vertex 2 (100, 100)
+        assert_eq!(
+            hit_polygon_vertex(&points, img_rect, img_size, Pos2::new(98.0, 99.0), 8.0),
+            Some(2)
+        );
+
+        // Far away from all vertices
+        assert_eq!(
+            hit_polygon_vertex(&points, img_rect, img_size, Pos2::new(50.0, 50.0), 8.0),
+            None
+        );
+    }
+
+    #[test]
+    fn test_hit_polygon_edge() {
+        let points = vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]];
+        let img_rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0));
+        let img_size = Vec2::new(100.0, 100.0);
+
+        // Hovering near top edge (between vertex 0 and 1)
+        assert_eq!(
+            hit_polygon_edge(&points, img_rect, img_size, Pos2::new(50.0, 2.0), 8.0),
+            Some(0)
+        );
+
+        // Hovering near bottom edge (between vertex 2 and 3)
+        assert_eq!(
+            hit_polygon_edge(&points, img_rect, img_size, Pos2::new(50.0, 99.0), 8.0),
+            Some(2)
+        );
+
+        // Center of polygon is far from edges
+        assert_eq!(
+            hit_polygon_edge(&points, img_rect, img_size, Pos2::new(50.0, 50.0), 8.0),
+            None
+        );
     }
 }
